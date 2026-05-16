@@ -1,0 +1,249 @@
+"""
+incidentiq_watch.py — Connect your Flask ecommerce app to IncidentIQ.
+
+Run (one-shot scan + fix):
+  python incidentiq_watch.py
+
+Run (continuous watch mode):
+  python incidentiq_watch.py --watch
+"""
+
+import os, sys, json, time, re, argparse
+from pathlib import Path
+from datetime import datetime, timezone
+from collections import deque
+
+try:
+    import httpx
+except ImportError:
+    print("httpx not installed. Run: pip install httpx")
+    sys.exit(1)
+
+APP_DIR        = Path(__file__).parent / "backend"
+LOG_FILE       = APP_DIR / "server.log"
+INCIDENTIQ_URL = "http://localhost:8000"
+SERVICE_NAME   = "ecommerce-flask"
+APP_PORT       = 5000
+POLL_INTERVAL  = 5
+ERROR_THRESHOLD = 3
+WINDOW_LINES   = 100
+ALERT_COOLDOWN = 60
+
+_last_alert_at = 0.0
+_last_log_size = 0
+_seen_lines    = deque(maxlen=WINDOW_LINES)
+_alert_count   = 0
+
+
+def sep(title=""):
+    line = "-" * 65
+    print(f"\n{line}")
+    if title:
+        print(f"  {title}")
+        print(line)
+
+
+def read_new_log_lines():
+    global _last_log_size
+    if not LOG_FILE.exists():
+        return []
+    current_size = LOG_FILE.stat().st_size
+    if current_size == _last_log_size:
+        return []
+    if current_size < _last_log_size:
+        _last_log_size = 0
+    with open(LOG_FILE, encoding="utf-8", errors="replace") as f:
+        f.seek(_last_log_size)
+        new_content = f.read()
+    _last_log_size = current_size
+    return [l for l in new_content.splitlines() if l.strip()]
+
+
+def classify_lines(lines):
+    errors   = [l for l in lines if any(x in l for x in ["[ERROR]","ERROR","Exception","Traceback","500","Internal Server"])]
+    warnings = [l for l in lines if any(x in l for x in ["[WARNING]","WARNING","WARN","404","400"])]
+    return {"errors": errors, "warnings": warnings, "all": lines}
+
+
+def read_source_files():
+    files = {}
+    for path in APP_DIR.rglob("*.py"):
+        if "__pycache__" in str(path):
+            continue
+        try:
+            rel = path.relative_to(APP_DIR.parent)
+            files[str(rel).replace("\\", "/")] = path.read_text(encoding="utf-8")
+        except Exception as e:
+            print(f"  Warning: could not read {path}: {e}")
+    return files
+
+
+def static_scan(code_map):
+    issues = []
+    for fname, code in code_map.items():
+        short = fname.split("/")[-1]
+        if re.search(r'f["\'].*SELECT|f["\'].*INSERT|f["\'].*UPDATE|f["\'].*DELETE', code):
+            issues.append(f"WARN  SQL injection risk in {short}")
+        if "eval(" in code or "exec(" in code:
+            issues.append(f"ERROR Dangerous eval/exec in {short}")
+        if "debug=False" in code:
+            issues.append(f"WARN  Flask debug=False in {short} - unsafe for production")
+        if re.search(r'password\s*=\s*["\'][^"\']{4,}["\']', code, re.IGNORECASE):
+            issues.append(f"ERROR Possible hardcoded password in {short}")
+        if re.search(r'except\s*:', code) or re.search(r'except\s+Exception\s*:', code):
+            issues.append(f"WARN  Bare/broad exception handler in {short} - may hide errors")
+    return issues
+
+
+def send_to_incidentiq(error_lines, all_recent_lines, code_map, static_issues):
+    error_count = len(error_lines)
+    description = (
+        f"Flask ecommerce app on port {APP_PORT} - {error_count} error(s) in server.log. "
+        + (f"Issues: {'; '.join(static_issues[:3])}." if static_issues else "Runtime errors detected.")
+    )
+    all_logs = list(dict.fromkeys(error_lines[-30:] + all_recent_lines[-20:] + static_issues))
+    payload = {
+        "service": SERVICE_NAME,
+        "description": description,
+        "severity": "p1" if error_count >= 5 else "p2",
+        "telemetry": {
+            "error_count": error_count,
+            "error_rate_percent": min(error_count * 5, 100),
+            "latency_p99_ms": 500,
+        },
+        "logs": all_logs,
+        "deployment_history": [
+            {"version": "current", "timestamp": datetime.now(timezone.utc).isoformat(),
+             "author": "developer", "description": "Current running version"}
+        ],
+        "code_context": code_map,
+    }
+    response = httpx.post(f"{INCIDENTIQ_URL}/api/incident/investigate", json=payload, timeout=120.0)
+    response.raise_for_status()
+    return response.json()
+
+
+def print_result(result):
+    sep("IncidentIQ Analysis Complete")
+    print(f"  Incident ID : {result.get('incident_id')}")
+    print(f"  Workflow    : {result.get('workflow_id')}")
+    print(f"  State       : {result.get('state','').replace('WorkflowState.','')}")
+    print(f"  Anomalies   : {result.get('anomalies_detected', 0)} detected")
+    rca = result.get("rca", {})
+    if rca:
+        conf = rca.get("confidence", 0)
+        print(f"\n  Root Cause ({conf*100:.0f}% confidence):")
+        print(f"  -> {rca.get('top_hypothesis')}")
+        print(f"\n  Mitigations:")
+        for m in rca.get("mitigations", []):
+            print(f"    * {m}")
+    pr = result.get("pull_request")
+    if pr:
+        print(f"\n  Generated PR:")
+        print(f"    Title  : {pr.get('title')}")
+        print(f"    Branch : {pr.get('branch')}")
+        print(f"    Conf   : {pr.get('confidence',0)*100:.0f}%")
+    if result.get("requires_human_approval"):
+        print(f"\n  Human approval required before deployment")
+    print(f"\n  Reasoning Log:")
+    for entry in result.get("reasoning_log", []):
+        print(f"    {entry}")
+    print(f"\n  Dashboard : http://localhost:3000")
+    print(f"  API Docs  : http://localhost:8000/docs")
+
+
+def run_once():
+    sep("IncidentIQ - One-shot scan of your Flask app")
+    print(f"  App dir  : {APP_DIR}")
+    print(f"  Log file : {LOG_FILE}")
+    all_lines = []
+    if LOG_FILE.exists():
+        all_lines = [l for l in LOG_FILE.read_text(encoding="utf-8").splitlines() if l.strip()]
+        print(f"  Log lines: {len(all_lines)} total")
+    else:
+        print(f"  Log file not found - will scan code only")
+    classified = classify_lines(all_lines)
+    print(f"  Errors   : {len(classified['errors'])}")
+    print(f"  Warnings : {len(classified['warnings'])}")
+    code_map = read_source_files()
+    print(f"  Files    : {len(code_map)} Python files")
+    for f in sorted(code_map.keys()):
+        print(f"    * {f}  ({len(code_map[f])} chars)")
+    static_issues = static_scan(code_map)
+    if static_issues:
+        print(f"\n  Static scan findings:")
+        for issue in static_issues:
+            print(f"    {issue}")
+    else:
+        print(f"\n  Static scan: clean")
+    print(f"\n  Sending to IncidentIQ... (~20-30 seconds)")
+    try:
+        result = send_to_incidentiq(classified["errors"], all_lines[-50:], code_map, static_issues)
+        print_result(result)
+    except httpx.ConnectError:
+        print(f"\n  Cannot connect to IncidentIQ at {INCIDENTIQ_URL}")
+        print(f"  Make sure IncidentIQ is running on port 8000")
+        sys.exit(1)
+    except httpx.HTTPStatusError as e:
+        print(f"\n  HTTP {e.response.status_code}: {e.response.text[:200]}")
+        sys.exit(1)
+
+
+def run_watch():
+    global _last_alert_at, _alert_count, _last_log_size
+    sep("IncidentIQ - Watching your Flask app")
+    print(f"  Log file      : {LOG_FILE}")
+    print(f"  Poll interval : {POLL_INTERVAL}s")
+    print(f"  Alert on      : {ERROR_THRESHOLD}+ ERROR lines")
+    print(f"  IncidentIQ    : {INCIDENTIQ_URL}")
+    print(f"\n  Watching... (Ctrl+C to stop)\n")
+    if LOG_FILE.exists():
+        _last_log_size = LOG_FILE.stat().st_size
+    while True:
+        try:
+            new_lines = read_new_log_lines()
+            for line in new_lines:
+                _seen_lines.append(line)
+            classified = classify_lines(list(_seen_lines))
+            error_lines = classified["errors"]
+            now = time.time()
+            cooldown_ok = (now - _last_alert_at) > ALERT_COOLDOWN
+            ts = datetime.now().strftime("%H:%M:%S")
+            status = "RED" if len(error_lines) >= ERROR_THRESHOLD else "OK "
+            print(f"  [{ts}] {status}  errors={len(error_lines)}  warnings={len(classified['warnings'])}  new={len(new_lines)}")
+            if len(error_lines) >= ERROR_THRESHOLD and cooldown_ok:
+                _last_alert_at = now
+                _alert_count += 1
+                sep(f"ALERT #{_alert_count} - {len(error_lines)} errors detected")
+                for e in error_lines[-5:]:
+                    print(f"  {e}")
+                code_map = read_source_files()
+                static_issues = static_scan(code_map)
+                print(f"\n  Sending to IncidentIQ...")
+                try:
+                    result = send_to_incidentiq(error_lines, list(_seen_lines)[-50:], code_map, static_issues)
+                    print_result(result)
+                    _seen_lines.clear()
+                except httpx.ConnectError:
+                    print(f"  Cannot reach IncidentIQ at {INCIDENTIQ_URL}")
+                except Exception as e:
+                    print(f"  Error: {e}")
+        except KeyboardInterrupt:
+            print("\n\n  Watcher stopped.")
+            break
+        except Exception as e:
+            print(f"  Watcher error: {e}")
+        time.sleep(POLL_INTERVAL)
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Connect Flask app to IncidentIQ")
+    parser.add_argument("--watch", action="store_true", help="Continuously watch server.log")
+    args = parser.parse_args()
+    if args.watch:
+        run_watch()
+    else:
+        run_once()
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ShopKiro</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <!-- NAVBAR -->
+  <header class="navbar">
+    <div class="nav-brand">🛍️ ShopKiro</div>
+    <nav class="nav-links">
+      <a href="#" onclick="showPage('shop')" class="nav-link active" id="nav-shop">Shop</a>
+      <a href="#" onclick="showPage('orders')" class="nav-link" id="nav-orders">My Orders</a>
+    </nav>
+    <button class="cart-btn" onclick="toggleCart()">
+      🛒 Cart <span class="cart-count" id="cart-count">0</span>
+    </button>
+  </header>
+
+  <!-- SHOP PAGE -->
+  <main id="page-shop" class="page active">
+    <section class="hero">
+      <h1>Find What You Love</h1>
+      <p>Quality products at great prices, delivered fast.</p>
+    </section>
+
+    <section class="controls">
+      <input type="text" id="search-input" placeholder="Search products..." oninput="filterProducts()" />
+      <div class="categories" id="category-list">
+        <!-- Populated by JS -->
+      </div>
+    </section>
+
+    <section class="products-grid" id="products-grid">
+      <!-- Populated by JS -->
+    </section>
+  </main>
+
+  <!-- ORDERS PAGE -->
+  <main id="page-orders" class="page">
+    <section class="orders-section">
+      <h2>My Orders</h2>
+      <div id="orders-list" class="orders-list">
+        <!-- Populated by JS -->
+      </div>
+    </section>
+  </main>
+
+  <!-- CART SIDEBAR -->
+  <div class="cart-overlay" id="cart-overlay" onclick="toggleCart()"></div>
+  <aside class="cart-sidebar" id="cart-sidebar">
+    <div class="cart-header">
+      <h2>Your Cart</h2>
+      <button class="close-btn" onclick="toggleCart()">✕</button>
+    </div>
+    <div class="cart-items" id="cart-items">
+      <!-- Populated by JS -->
+    </div>
+    <div class="cart-footer">
+      <div class="cart-total">Total: <strong id="cart-total">$0.00</strong></div>
+      <button class="checkout-btn" onclick="showCheckout()">Checkout</button>
+    </div>
+  </aside>
+
+  <!-- CHECKOUT MODAL -->
+  <div class="modal-overlay" id="modal-overlay">
+    <div class="modal" id="checkout-modal">
+      <div class="modal-header">
+        <h2>Checkout</h2>
+        <button class="close-btn" onclick="closeCheckout()">✕</button>
+      </div>
+      <form id="checkout-form" onsubmit="placeOrder(event)">
+        <div class="form-group">
+          <label for="cust-name">Full Name</label>
+          <input type="text" id="cust-name" placeholder="Jane Doe" required />
+        </div>
+        <div class="form-group">
+          <label for="cust-email">Email</label>
+          <input type="email" id="cust-email" placeholder="jane@example.com" required />
+        </div>
+        <div class="form-group">
+          <label for="cust-address">Shipping Address</label>
+          <textarea id="cust-address" placeholder="123 Main St, City, Country" rows="3" required></textarea>
+        </div>
+        <div class="order-summary" id="order-summary">
+          <!-- Populated by JS -->
+        </div>
+        <button type="submit" class="checkout-btn">Place Order</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- SUCCESS TOAST -->
+  <div class="toast" id="toast"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
