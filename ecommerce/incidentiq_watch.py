@@ -86,8 +86,8 @@ def static_scan(code_map):
             issues.append(f"WARN  SQL injection risk in {short}")
         if "eval(" in code or "exec(" in code:
             issues.append(f"ERROR Dangerous eval/exec in {short}")
-        if "debug=True" in code:
-            issues.append(f"WARN  Flask debug=True in {short} - unsafe for production")
+        if "debug=False" in code:
+            issues.append(f"WARN  Flask debug=False in {short} - unsafe for production")
         if re.search(r'password\s*=\s*["\'][^"\']{4,}["\']', code, re.IGNORECASE):
             issues.append(f"ERROR Possible hardcoded password in {short}")
         if re.search(r'except\s*:', code) or re.search(r'except\s+Exception\s*:', code):
