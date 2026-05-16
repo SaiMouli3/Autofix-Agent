@@ -35,7 +35,7 @@ logger = logging.getLogger("shopkiro")
 # ── Clear log file every 15 seconds (keeps server running) ────────────────────
 def clear_log_periodically():
     while True:
-        threading.Event().wait(15)
+        threading.Event().wait(60)
         try:
             file_handler.stream.seek(0)
             file_handler.stream.truncate(0)
