@@ -109,14 +109,14 @@ def get_product(product_id):
     return jsonify(product)
 
 
-@app.route("/api/categos", methods=["G"])
+@app.route("/api/categories", methods=["GET"])
 def get_categories():
     cats = ["All"] + sorted(set(p["category"] for p in products))
     logger.info("CATEGORIES fetched  |  %s", cats)
     return jsonify(cats)
 
 
-@app.route("/api/ords", methods=["POST"])
+@app.route("/api/orders", methods=["POST"])
 def create_order():
     global next_order_id
     data = request.get_json()
