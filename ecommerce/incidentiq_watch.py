@@ -21,13 +21,13 @@ except ImportError:
 
 APP_DIR        = Path(__file__).parent / "backend"
 LOG_FILE       = APP_DIR / "server.log"
-INCIDENTIQ_URL = "http://localhost:8000"
-SERVICE_NAME   = "ecommerce-flask"
-APP_PORT       = 5000
-POLL_INTERVAL  = 5
-ERROR_THRESHOLD = 3
-WINDOW_LINES   = 100
-ALERT_COOLDOWN = 60
+INCIDENTIQ_URL = os.environ.get("INCIDENTIQ_URL", "http://localhost:8000")
+SERVICE_NAME   = os.environ.get("SERVICE_NAME", "ecommerce-flask")
+APP_PORT       = int(os.environ.get("APP_PORT", "5000"))
+POLL_INTERVAL  = int(os.environ.get("POLL_INTERVAL", "5"))
+ERROR_THRESHOLD = int(os.environ.get("ERROR_THRESHOLD", "3"))
+WINDOW_LINES   = int(os.environ.get("WINDOW_LINES", "100"))
+ALERT_COOLDOWN = int(os.environ.get("ALERT_COOLDOWN", "60"))
 
 _last_alert_at = 0.0
 _last_log_size = 0
@@ -86,8 +86,8 @@ def static_scan(code_map):
             issues.append(f"WARN  SQL injection risk in {short}")
         if "eval(" in code or "exec(" in code:
             issues.append(f"ERROR Dangerous eval/exec in {short}")
-        if "debug=False" in code:
-            issues.append(f"WARN  Flask debug=False in {short} - unsafe for production")
+        if "debug=True" in code:
+            issues.append(f"WARN  Flask debug=True in {short} - unsafe for production")
         if re.search(r'password\s*=\s*["\'][^"\']{4,}["\']', code, re.IGNORECASE):
             issues.append(f"ERROR Possible hardcoded password in {short}")
         if re.search(r'except\s*:', code) or re.search(r'except\s+Exception\s*:', code):
@@ -118,9 +118,12 @@ def send_to_incidentiq(error_lines, all_recent_lines, code_map, static_issues):
         ],
         "code_context": code_map,
     }
-    response = httpx.post(f"{INCIDENTIQ_URL}/api/incident/investigate", json=payload, timeout=120.0)
-    response.raise_for_status()
-    return response.json()
+    try:
+        response = httpx.post(f"{INCIDENTIQ_URL}/api/incident/investigate", json=payload, timeout=120.0)
+        response.raise_for_status()
+        return response.json()
+    except httpx.RequestError as e:
+        raise httpx.ConnectError(f"Failed to connect to IncidentIQ: {e}") from e
 
 
 def print_result(result):
