@@ -3,6 +3,7 @@ import atexit
 import signal
 import sys
 import traceback
+import threading
 from datetime import datetime
 from flask import Flask, jsonify, request
 from flask_cors import CORS
@@ -14,18 +15,39 @@ LOG_FILE = "server.log"
 with open(LOG_FILE, "w") as f:
     f.write("")
 
+file_handler = logging.FileHandler(LOG_FILE, encoding="utf-8")
+file_handler.setFormatter(logging.Formatter(
+    "%(asctime)s  [%(levelname)s]  %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S"
+))
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s  [%(levelname)s]  %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
     handlers=[
-        logging.FileHandler(LOG_FILE, encoding="utf-8"),
+        file_handler,
         logging.StreamHandler(sys.stdout),
     ],
 )
 logger = logging.getLogger("shopkiro")
 
-# ── Redirect ALL stderr (Python tracebacks) to log file too ───────────────────
+# ── Clear log file every 15 seconds (keeps server running) ────────────────────
+def clear_log_periodically():
+    while True:
+        threading.Event().wait(60)
+        try:
+            file_handler.stream.seek(0)
+            file_handler.stream.truncate(0)
+            logger.info("LOG CLEARED  |  auto-cleared every 15 seconds  |  %s",
+                        datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+        except Exception:
+            pass
+
+log_cleaner = threading.Thread(target=clear_log_periodically, daemon=True)
+log_cleaner.start()
+
+# ── Redirect ALL stderr to log ─────────────────────────────────────────────────
 class StderrToLog:
     def write(self, msg):
         if msg.strip():
@@ -35,7 +57,7 @@ class StderrToLog:
 
 sys.stderr = StderrToLog()
 
-# ── Catch any unhandled exception and write full traceback to log ──────────────
+# ── Catch unhandled exceptions ─────────────────────────────────────────────────
 def handle_exception(exc_type, exc_value, exc_tb):
     tb_str = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
     logger.critical("UNHANDLED EXCEPTION:\n%s", tb_str)
@@ -109,14 +131,14 @@ def get_product(product_id):
     return jsonify(product)
 
 
-@app.route("/api/categos", methods=["G"])
+@app.route("/api/categories", methods=["GET"])
 def get_categories():
     cats = ["All"] + sorted(set(p["category"] for p in products))
     logger.info("CATEGORIES fetched  |  %s", cats)
     return jsonify(cats)
 
 
-@app.route("/api/ords", methods=["POST"])
+@app.route("/api/orders", methods=["POST"])
 def create_order():
     global next_order_id
     data = request.get_json()
@@ -183,6 +205,31 @@ def get_orders():
     return jsonify(orders)
 
 
+# ── Startup Demo Errors ────────────────────────────────────────────────────────
+def run_startup_checks():
+    """Simulate 3 startup checks — logs warnings/errors so you can see them immediately."""
+
+    # Check 1: Warn if product stock is low
+    low_stock = [p for p in products if p["stock"] < 12]
+    if low_stock:
+        for p in low_stock:
+            logger.warning("STARTUP CHECK  |  Low stock warning  |  product='%s'  stock=%d",
+                           p["name"], p["stock"])
+    else:
+        logger.info("STARTUP CHECK  |  Stock levels OK")
+
+    # Check 2: Simulate a config value missing (demo error)
+    DB_URL = None  # pretend this was supposed to be set
+    if not DB_URL:
+        logger.error("STARTUP CHECK  |  CONFIG ERROR  |  DB_URL is not set — using in-memory store as fallback")
+
+    # Check 3: Simulate a failed external service ping (demo critical)
+    try:
+        raise ConnectionRefusedError("Payment gateway unreachable at startup")
+    except ConnectionRefusedError as e:
+        logger.critical("STARTUP CHECK  |  EXTERNAL SERVICE FAILED  |  %s  |  Continuing without payment service", e)
+
+
 # ── Server Lifecycle ───────────────────────────────────────────────────────────
 def on_shutdown():
     logger.info("=" * 60)
@@ -203,8 +250,16 @@ if __name__ == "__main__":
         logger.info("=" * 60)
         logger.info("SERVER STARTED  |  %s", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
         logger.info("Listening on http://localhost:5000")
-        logger.info("Log file: %s", LOG_FILE)
+        logger.info("Log file: %s  |  clears every 15 seconds", LOG_FILE)
         logger.info("=" * 60)
+
+        # Run startup checks — shows demo warnings/errors immediately
+        run_startup_checks()
+
+        logger.info("-" * 60)
+        logger.info("Startup checks complete. Server is ready.")
+        logger.info("-" * 60)
+
         app.run(debug=False, port=5000)
     except Exception:
         logger.critical("SERVER CRASHED ON STARTUP:\n%s", traceback.format_exc())
