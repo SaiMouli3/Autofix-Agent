@@ -27,6 +27,12 @@ type Config struct {
 	LLMEffort        string
 	LLMFallbacks     bool
 
+	// Experiential Labs gateway (takes precedence over the direct Anthropic key).
+	ExpLabsAPIKey   string
+	ExpLabsBaseURL  string
+	ExpLabsModel    string
+	ExpLabsProtocol string // openai (chat/completions) | anthropic (messages)
+
 	GoogleClientID string
 }
 
@@ -59,7 +65,11 @@ func Load() Config {
 		LLMModel:         get("LLM_MODEL", "claude-opus-5-5"),
 		LLMEffort:        get("LLM_EFFORT", "low"),
 		GoogleClientID:   get("GOOGLE_CLIENT_ID", ""),
+		ExpLabsAPIKey:    get("EXP_LABS_API_KEY", ""),
+		ExpLabsBaseURL:   get("EXP_LABS_BASE_URL", "https://api.experientiallabs.ai/v1"),
+		ExpLabsProtocol:  get("EXP_LABS_PROTOCOL", "openai"),
 	}
+	c.ExpLabsModel = get("EXP_LABS_MODEL", c.LLMModel)
 	c.CookieSecure = getBool("COOKIE_SECURE", c.Env == "production")
 	// Server-side refusal fallbacks are a first-party API feature; default
 	// them off when a custom gateway/base URL is configured.

@@ -21,6 +21,10 @@ services:
       DATABASE_URL: postgres://eaos:eaos@postgres:5432/eaos?sslmode=disable
       REDIS_URL: redis://redis:6379
       JWT_SECRET: ${JWT_SECRET:-change-me-in-production-please}
+      EXP_LABS_API_KEY: ${EXP_LABS_API_KEY:-}
+      EXP_LABS_BASE_URL: ${EXP_LABS_BASE_URL:-https://api.experientiallabs.ai/v1}
+      EXP_LABS_MODEL: ${EXP_LABS_MODEL:-}
+      EXP_LABS_PROTOCOL: ${EXP_LABS_PROTOCOL:-openai}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-}
       LLM_MODEL: ${LLM_MODEL:-claude-opus-5-5}

@@ -51,7 +51,18 @@ generate a demo store for any business type (fashion, electronics, beauty, home,
 ### Connecting the AI model
 
 Everything works without an API key: metrics, detection and insights are deterministic, and the assistant
-falls back to a grounded rule-based reasoner. To enable LLM reasoning, set on the **API** (never the web app):
+falls back to a grounded rule-based reasoner. To enable LLM reasoning, set these on the **API** (never the web
+app). With Docker, put them in `ecommerce-ai-os/.env` (gitignored):
+
+```bash
+# Experiential Labs gateway (preferred when set)
+EXP_LABS_API_KEY=xpl_...
+EXP_LABS_BASE_URL=https://api.experientiallabs.ai/v1
+EXP_LABS_MODEL=claude-opus-5-5   # model name as the gateway exposes it
+EXP_LABS_PROTOCOL=openai         # openai (/chat/completions) or anthropic (/messages)
+```
+
+Or, directly against Anthropic:
 
 ```bash
 ANTHROPIC_API_KEY=...            # your key

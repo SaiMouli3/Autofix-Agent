@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -61,9 +62,21 @@ func main() {
 	}
 	defer c.Close()
 
-	l := llm.New(llm.Options{APIKey: cfg.AnthropicAPIKey, BaseURL: cfg.AnthropicBaseURL, Model: cfg.LLMModel, Effort: cfg.LLMEffort, Fallbacks: cfg.LLMFallbacks})
+	var l llm.Client
+	switch {
+	case cfg.ExpLabsAPIKey != "" && cfg.ExpLabsProtocol == "anthropic":
+		// The Anthropic SDK appends /v1/messages itself.
+		base := strings.TrimSuffix(strings.TrimRight(cfg.ExpLabsBaseURL, "/"), "/v1")
+		l = llm.New(llm.Options{APIKey: cfg.ExpLabsAPIKey, BaseURL: base, Model: cfg.ExpLabsModel, Effort: cfg.LLMEffort})
+		slog.Info("llm: Experiential Labs gateway (anthropic protocol)", "model", cfg.ExpLabsModel)
+	case cfg.ExpLabsAPIKey != "":
+		l = llm.NewOpenAICompatible(cfg.ExpLabsBaseURL, cfg.ExpLabsAPIKey, cfg.ExpLabsModel)
+		slog.Info("llm: Experiential Labs gateway", "base_url", cfg.ExpLabsBaseURL, "model", cfg.ExpLabsModel)
+	default:
+		l = llm.New(llm.Options{APIKey: cfg.AnthropicAPIKey, BaseURL: cfg.AnthropicBaseURL, Model: cfg.LLMModel, Effort: cfg.LLMEffort, Fallbacks: cfg.LLMFallbacks})
+	}
 	if !l.Enabled() {
-		slog.Warn("ANTHROPIC_API_KEY not set — assistant runs on the deterministic reasoner")
+		slog.Warn("no LLM key set (EXP_LABS_API_KEY / ANTHROPIC_API_KEY) — assistant runs on the deterministic reasoner")
 	}
 	svc := service.New(r, c, l)
 
