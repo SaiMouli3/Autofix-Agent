@@ -30,6 +30,14 @@ type Service struct {
 	loading  map[string]*sync.Mutex
 	reports  map[string]*cachedReport
 	briefs   map[string]cachedText
+	// shifts records how far each loaded dataset was moved forward in time,
+	// so new records can be persisted on the stored (unshifted) timeline.
+	shifts map[string]time.Duration
+
+	// ShopStoreID is the store the public storefront sells from.
+	ShopStoreID string
+	shopMu      sync.Mutex
+	shopCache   *shopIndex
 }
 
 type cachedReport struct {
@@ -46,7 +54,7 @@ const reportTTL = 90 * time.Second
 
 func New(r repo.Repo, c cache.Cache, l llm.Client) *Service {
 	return &Service{Repo: r, Cache: c, LLM: l, datasets: map[string]*model.Dataset{}, loading: map[string]*sync.Mutex{},
-		reports: map[string]*cachedReport{}, briefs: map[string]cachedText{}}
+		reports: map[string]*cachedReport{}, briefs: map[string]cachedText{}, shifts: map[string]time.Duration{}}
 }
 
 // Dataset returns the store's dataset, loading it once and re-anchoring its
@@ -77,13 +85,16 @@ func (s *Service) Dataset(ctx context.Context, st model.Store) (*model.Dataset, 
 		return nil, err
 	}
 	// Re-anchor whole days so seeded data stays current.
+	var shift time.Duration
 	if delta := time.Since(ds.Now); delta > time.Hour {
-		ds.Shift(delta.Truncate(24 * time.Hour))
+		shift = delta.Truncate(24 * time.Hour)
+		ds.Shift(shift)
 	}
 	ds.Now = time.Now()
 	slog.Info("dataset loaded", "store", st.ID, "orders", len(ds.Orders), "took", time.Since(start))
 	s.mu.Lock()
 	s.datasets[st.ID] = ds
+	s.shifts[st.ID] = shift
 	s.mu.Unlock()
 	return ds, nil
 }

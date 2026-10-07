@@ -80,9 +80,14 @@ func main() {
 	}
 	svc := service.New(r, c, l)
 
+	svc.ShopStoreID = cfg.ShopStoreID
 	if cfg.SeedDemo {
-		if err := seedDemo(ctx, svc); err != nil {
+		demoStore, err := seedDemo(ctx, svc)
+		if err != nil {
 			slog.Error("demo seed failed", "err", err)
+		}
+		if svc.ShopStoreID == "" {
+			svc.ShopStoreID = demoStore
 		}
 	}
 
@@ -100,30 +105,31 @@ func main() {
 	_ = srv.App.ShutdownWithTimeout(10 * time.Second)
 }
 
-// seedDemo ensures a ready-to-use demo account exists.
-func seedDemo(ctx context.Context, svc *service.Service) error {
+// seedDemo ensures a ready-to-use demo account exists and returns its store.
+func seedDemo(ctx context.Context, svc *service.Service) (string, error) {
 	u, err := svc.Repo.UserByEmail(ctx, demoEmail)
 	if errors.Is(err, repo.ErrNotFound) {
 		hash, herr := auth.HashPassword(demoPassword)
 		if herr != nil {
-			return herr
+			return "", herr
 		}
 		u, err = svc.Repo.CreateOrgUser(ctx, "Loomline", model.User{Name: "Admin", Email: demoEmail, PasswordHash: hash})
 	}
 	if err != nil {
-		return err
+		return "", err
 	}
 	stores, err := svc.Repo.StoresByOrg(ctx, u.OrgID)
 	if err != nil {
-		return err
+		return "", err
 	}
-	if len(stores) == 0 {
-		start := time.Now()
-		st, err := svc.CreateDemoStore(ctx, u.OrgID, "fashion", "Loomline")
-		if err != nil {
-			return err
-		}
-		slog.Info("demo store seeded", "store", st.ID, "took", time.Since(start), "login", demoEmail)
+	if len(stores) > 0 {
+		return stores[0].ID, nil
 	}
-	return nil
+	start := time.Now()
+	st, err := svc.CreateDemoStore(ctx, u.OrgID, "fashion", "Loomline")
+	if err != nil {
+		return "", err
+	}
+	slog.Info("demo store seeded", "store", st.ID, "took", time.Since(start), "login", demoEmail)
+	return st.ID, nil
 }

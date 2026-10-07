@@ -153,6 +153,14 @@ func (p *Postgres) StoreForOrg(ctx context.Context, orgID, storeID string) (*mod
 	return &s, nil
 }
 
+func (p *Postgres) StoreByID(ctx context.Context, storeID string) (*model.Store, error) {
+	s, err := scanStore(p.pool.QueryRow(ctx, `SELECT `+storeCols+` FROM stores WHERE id = $1`, storeID))
+	if err != nil {
+		return nil, notFound(err)
+	}
+	return &s, nil
+}
+
 func nz(s string) any {
 	if s == "" {
 		return nil
@@ -612,6 +620,43 @@ func (p *Postgres) SetReviewResponse(ctx context.Context, storeID, reviewID, tex
 		return ErrNotFound
 	}
 	return err
+}
+
+func (p *Postgres) AddShopOrder(ctx context.Context, storeID string, o model.Order, newCustomer *model.Customer, sh model.Shipment, stock []model.InventoryItem) error {
+	tx, err := p.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	if c := newCustomer; c != nil {
+		if _, err := tx.Exec(ctx, `INSERT INTO customers (store_id, id, name, email, phone, city, state, region, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+			storeID, c.ID, c.Name, c.Email, c.Phone, c.City, c.State, c.Region, c.CreatedAt); err != nil {
+			return fmt.Errorf("insert customer: %w", err)
+		}
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO orders (store_id, id, number, customer_id, created_at, status, payment_method, subtotal, discount, shipping_fee, total, campaign_id, channel)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+		storeID, o.ID, o.Number, o.CustomerID, o.CreatedAt, o.Status, o.PaymentMethod, o.Subtotal, o.Discount, o.ShippingFee, o.Total, nz(o.CampaignID), o.Channel); err != nil {
+		return fmt.Errorf("insert order: %w", err)
+	}
+	for _, it := range o.Items {
+		if _, err := tx.Exec(ctx, `INSERT INTO order_items (store_id, order_id, product_id, qty, unit_price, unit_cost) VALUES ($1,$2,$3,$4,$5,$6)`,
+			storeID, o.ID, it.ProductID, it.Qty, it.UnitPrice, it.UnitCost); err != nil {
+			return fmt.Errorf("insert order item: %w", err)
+		}
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO shipments (store_id, order_id, courier, state, region, shipped_at, promised_at, delivered_at, ndr_attempts, status, cost)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+		storeID, sh.OrderID, sh.Courier, sh.State, sh.Region, sh.ShippedAt, sh.PromisedAt, sh.DeliveredAt, sh.NDRAttempts, sh.Status, sh.Cost); err != nil {
+		return fmt.Errorf("insert shipment: %w", err)
+	}
+	for _, inv := range stock {
+		if _, err := tx.Exec(ctx, `UPDATE inventory SET on_hand=$3, updated_at=$4 WHERE store_id=$1 AND product_id=$2`,
+			storeID, inv.ProductID, inv.OnHand, inv.UpdatedAt); err != nil {
+			return fmt.Errorf("update inventory: %w", err)
+		}
+	}
+	return tx.Commit(ctx)
 }
 
 func (p *Postgres) AddAction(ctx context.Context, storeID string, a UserAction) error {

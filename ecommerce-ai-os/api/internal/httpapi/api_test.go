@@ -123,3 +123,84 @@ func TestAuthAndTenantIsolation(t *testing.T) {
 		t.Fatalf("chat: %d %v", code, body)
 	}
 }
+
+func TestStorefront(t *testing.T) {
+	s := newTestServer()
+	owner := &client{t: t, s: s}
+	shopper := &client{t: t, s: s}
+
+	if code, _ := shopper.do("GET", "/api/shop", nil); code != 503 {
+		t.Fatalf("shop with no store configured should be 503, got %d", code)
+	}
+	if code, _ := owner.do("POST", "/api/auth/signup", map[string]string{"name": "Shop Owner", "email": "owner@example.com", "password": "password-123", "company": "Shop Co"}); code != 201 {
+		t.Fatalf("signup: %d", code)
+	}
+	_, body := owner.do("POST", "/api/stores", map[string]string{"platform": "demo", "businessType": "fashion"})
+	storeID := body["store"].(map[string]any)["id"].(string)
+	s.svc.ShopStoreID = storeID
+
+	// Public, no session.
+	code, home := shopper.do("GET", "/api/shop", nil)
+	if code != 200 || len(home["bestSellers"].([]any)) == 0 || len(home["states"].([]any)) == 0 {
+		t.Fatalf("shop home: %d", code)
+	}
+	code, cat := shopper.do("GET", "/api/shop/products?sort=price_asc&pageSize=48", nil)
+	items := cat["items"].([]any)
+	if code != 200 || len(items) == 0 {
+		t.Fatalf("catalog: %d", code)
+	}
+	// Pick an in-stock product.
+	var pid string
+	var avail float64
+	for _, it := range items {
+		p := it.(map[string]any)
+		if p["available"].(float64) >= 3 {
+			pid, avail = p["id"].(string), p["available"].(float64)
+			break
+		}
+	}
+	if pid == "" {
+		t.Fatal("no in-stock product")
+	}
+	code, detail := shopper.do("GET", "/api/shop/products/"+pid, nil)
+	if code != 200 {
+		t.Fatalf("product: %d", code)
+	}
+	if _, leaked := detail["product"].(map[string]any)["cost"]; leaked {
+		t.Fatal("storefront must not expose product cost")
+	}
+	if code, _ := shopper.do("GET", "/api/shop/products/P-nope", nil); code != 404 {
+		t.Fatalf("unknown product should 404, got %d", code)
+	}
+
+	state := home["states"].([]any)[0].(map[string]any)["name"].(string)
+	order := func(qty float64, st string) (int, map[string]any) {
+		return shopper.do("POST", "/api/shop/orders", map[string]any{
+			"items":    []map[string]any{{"productId": pid, "qty": qty}},
+			"customer": map[string]string{"name": "Jamie Rivera", "email": "jamie@example.com", "city": "Austin", "state": st},
+			"payment":  "card",
+		})
+	}
+	if code, _ := order(1, "Nowhere"); code != 422 {
+		t.Fatalf("unknown state should 422, got %d", code)
+	}
+	if avail <= 10 {
+		if code, _ := order(avail+1, state); code != 409 {
+			t.Fatalf("over-stock order should 409, got %d", code)
+		}
+	}
+	code, placed := order(2, state)
+	if code != 201 || placed["number"] == "" {
+		t.Fatalf("place order: %d %v", code, placed)
+	}
+
+	// The owner's dashboard sees the new order, and stock went down.
+	code, list := owner.do("GET", "/api/orders/list?q="+strings.TrimPrefix(placed["number"].(string), "#"), nil, "X-Store-ID", storeID)
+	if code != 200 || list["total"].(float64) < 1 {
+		t.Fatalf("order not visible to owner: %d %v", code, list)
+	}
+	_, detail = shopper.do("GET", "/api/shop/products/"+pid, nil)
+	if got := detail["product"].(map[string]any)["available"].(float64); got != avail-2 {
+		t.Fatalf("stock should drop from %v to %v, got %v", avail, avail-2, got)
+	}
+}

@@ -76,6 +76,8 @@ type Repo interface {
 	StoresByOrg(ctx context.Context, orgID string) ([]model.Store, error)
 	// StoreForOrg returns the store only if it belongs to orgID.
 	StoreForOrg(ctx context.Context, orgID, storeID string) (*model.Store, error)
+	// StoreByID is for the public storefront only; it bypasses org scoping.
+	StoreByID(ctx context.Context, storeID string) (*model.Store, error)
 	CreateStore(ctx context.Context, s model.Store, ds *model.Dataset) error
 	LoadDataset(ctx context.Context, s model.Store) (*model.Dataset, error)
 
@@ -90,6 +92,10 @@ type Repo interface {
 	SetAgentSettings(ctx context.Context, storeID, agentID string, s AgentSettings) error
 
 	SetReviewResponse(ctx context.Context, storeID, reviewID, text string) error
+
+	// AddShopOrder persists a storefront order: the customer (when new), the
+	// order and its items, its shipment, and the decremented stock levels.
+	AddShopOrder(ctx context.Context, storeID string, o model.Order, newCustomer *model.Customer, sh model.Shipment, stock []model.InventoryItem) error
 
 	AddAction(ctx context.Context, storeID string, a UserAction) error
 	Actions(ctx context.Context, storeID string, limit int) ([]UserAction, error)

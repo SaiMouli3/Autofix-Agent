@@ -1,12 +1,15 @@
 import { NextResponse, type NextRequest } from "next/server";
 
 const PUBLIC = ["/login", "/signup", "/forgot-password"];
+// The storefront is open to everyone, signed in or not.
+const OPEN = ["/shop"];
 
 // Route protection: a missing session cookie redirects to sign-in. The API
 // still validates the session on every request — this only avoids rendering
 // protected pages for signed-out visitors.
 export function proxy(req: NextRequest) {
   const { pathname, search } = req.nextUrl;
+  if (OPEN.some((p) => pathname === p || pathname.startsWith(p + "/"))) return NextResponse.next();
   const hasSession = req.cookies.has("eaos_session");
   const isPublic = PUBLIC.some((p) => pathname.startsWith(p));
   if (!hasSession && !isPublic) {

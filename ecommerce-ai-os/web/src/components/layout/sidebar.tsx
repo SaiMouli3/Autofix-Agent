@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Bot, LayoutDashboard, PanelLeftClose, PanelLeft, Sparkles } from "lucide-react";
+import { Bot, LayoutDashboard, PanelLeftClose, PanelLeft, Sparkles, Store } from "lucide-react";
 import { AGENTS } from "@/lib/agents";
 import { cn } from "@/lib/cn";
 import { useAgents } from "@/lib/queries";
@@ -48,6 +48,7 @@ export function SidebarContent({ collapsed = false, onNavigate }: { collapsed?: 
         <NavItem href="/insights" label="Business Insights" icon={Sparkles} active={pathname === "/insights"} collapsed={collapsed}
           badge={data?.business.issues} hue="var(--accent)" />
         <NavItem href="/agents" label="AI Team" icon={Bot} active={pathname === "/agents"} collapsed={collapsed} />
+        <NavItem href="/shop" label="Storefront" icon={Store} active={false} collapsed={collapsed} />
       </div>
       <div className={cn("eyebrow mb-1.5 mt-5 px-2", collapsed && "sr-only")}>Agents</div>
       {collapsed && <div className="my-3 h-px bg-border" />}

@@ -108,6 +108,16 @@ func (m *Memory) StoreForOrg(ctx context.Context, orgID, storeID string) (*model
 	return &s, nil
 }
 
+func (m *Memory) StoreByID(ctx context.Context, storeID string) (*model.Store, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	s, ok := m.stores[storeID]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	return &s, nil
+}
+
 func (m *Memory) CreateStore(ctx context.Context, s model.Store, ds *model.Dataset) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -201,6 +211,10 @@ func (m *Memory) SetAgentSettings(ctx context.Context, storeID, agentID string, 
 }
 
 func (m *Memory) SetReviewResponse(ctx context.Context, storeID, reviewID, text string) error {
+	return nil // the service updates the in-memory dataset directly
+}
+
+func (m *Memory) AddShopOrder(ctx context.Context, storeID string, o model.Order, newCustomer *model.Customer, sh model.Shipment, stock []model.InventoryItem) error {
 	return nil // the service updates the in-memory dataset directly
 }
 

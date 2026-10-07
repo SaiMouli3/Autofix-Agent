@@ -46,6 +46,9 @@ func (s *Server) routes() {
 	authG.Post("/forgot", s.forgot)
 	authG.Get("/google", s.google)
 
+	// Registered before the authenticated group so its middleware never runs here.
+	s.shopRoutes(api)
+
 	p := api.Group("", s.rateLimit("api", 600, time.Minute), s.requireAuth)
 	p.Get("/me", s.me)
 	p.Get("/stores", s.stores)

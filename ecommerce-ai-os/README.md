@@ -74,6 +74,17 @@ LLM_EFFORT=low                   # low | medium | high | xhigh | max
 With a key, the assistant, executive brief and review-response drafts are written by the model from the
 agents' structured findings (with citations back to the source insight); the model never computes metrics.
 
+### Storefront
+
+A public customer storefront runs at **`/shop`** (no sign-in needed). It sells the store's real catalog,
+showing prices, stock levels, ratings and reviews from the same data the agents analyze. Checkout validates
+stock and prices the cart on the server, then records an ordinary order: new customer, order, shipment and
+reduced stock. Every agent sees that order, so it appears right away in the Orders agent's Data tab.
+Storefront orders ship with the courier that has the best recent on-time rate in the buyer's region.
+No payment is collected.
+
+The shop sells from `SHOP_STORE_ID` if set, otherwise from the seeded demo store.
+
 ## Architecture
 
 ```
@@ -125,6 +136,10 @@ GET  /api/{orders,customers,products,inventory,reviews,complaints}/list   (searc
 GET  /api/products/:id   GET /api/customers/:id   GET /api/search?q=
 POST /api/reviews/:id/draft  PUT /api/reviews/:id/response
 POST /api/actions            POST /api/ai/chat        GET /api/health
+
+# public storefront (no session)
+GET  /api/shop               GET /api/shop/products?category=&q=&sort=&page=   GET /api/shop/products/:id
+POST /api/shop/orders
 ```
 
 All analytical endpoints accept `range=today|yesterday|7d|30d|90d|custom&from=YYYY-MM-DD&to=YYYY-MM-DD`.

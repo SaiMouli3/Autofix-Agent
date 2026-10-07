@@ -34,6 +34,10 @@ type Config struct {
 	ExpLabsProtocol string // openai (chat/completions) | anthropic (messages)
 
 	GoogleClientID string
+
+	// ShopStoreID is the store the public storefront sells from; empty means
+	// the seeded demo store.
+	ShopStoreID string
 }
 
 func get(key, def string) string {
@@ -65,6 +69,7 @@ func Load() Config {
 		LLMModel:         get("LLM_MODEL", "claude-opus-5-5"),
 		LLMEffort:        get("LLM_EFFORT", "low"),
 		GoogleClientID:   get("GOOGLE_CLIENT_ID", ""),
+		ShopStoreID:      get("SHOP_STORE_ID", ""),
 		ExpLabsAPIKey:    get("EXP_LABS_API_KEY", ""),
 		ExpLabsBaseURL:   get("EXP_LABS_BASE_URL", "https://api.experientiallabs.ai/v1"),
 		ExpLabsProtocol:  get("EXP_LABS_PROTOCOL", "openai"),
