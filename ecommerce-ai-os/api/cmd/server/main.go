@@ -21,7 +21,7 @@ import (
 )
 
 const (
-	demoEmail    = "subbu@loomline.in"
+	demoEmail    = "admin@loomline.in"
 	demoPassword = "demo-loomline"
 )
 
@@ -95,7 +95,7 @@ func seedDemo(ctx context.Context, svc *service.Service) error {
 		if herr != nil {
 			return herr
 		}
-		u, err = svc.Repo.CreateOrgUser(ctx, "Loomline", model.User{Name: "Subbu", Email: demoEmail, PasswordHash: hash})
+		u, err = svc.Repo.CreateOrgUser(ctx, "Loomline", model.User{Name: "Admin", Email: demoEmail, PasswordHash: hash})
 	}
 	if err != nil {
 		return err

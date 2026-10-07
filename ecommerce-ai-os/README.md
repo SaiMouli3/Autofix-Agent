@@ -27,7 +27,7 @@ top, connects their findings across domains, and tells the merchant what to do n
 ```bash
 cd ecommerce-ai-os
 docker compose up --build
-# open http://localhost:3000  ·  demo login: subbu@loomline.in / demo-loomline
+# open http://localhost:3000  ·  demo login: admin@loomline.in / demo-loomline
 ```
 
 ### Option B — local dev
@@ -44,7 +44,7 @@ npm install
 npm run dev                    # http://localhost:3000 (proxies /api → API_URL, default http://localhost:8080)
 ```
 
-On first start the API seeds a demo workspace: **subbu@loomline.in / demo-loomline** (Loomline, a fashion D2C
+On first start the API seeds a demo workspace: **admin@loomline.in / demo-loomline** (Loomline, a fashion D2C
 store). The login page has an "Explore the demo store" shortcut. New sign-ups go through onboarding and can
 generate a demo store for any business type (fashion, electronics, beauty, home, grocery, D2C).
 

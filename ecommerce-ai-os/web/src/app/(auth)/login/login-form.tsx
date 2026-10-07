@@ -23,7 +23,7 @@ const schema = z.object({
 });
 type Values = z.infer<typeof schema>;
 
-const DEMO = { email: "subbu@loomline.in", password: "demo-loomline" };
+const DEMO = { email: "admin@loomline.in", password: "demo-loomline" };
 
 export function LoginForm() {
   const router = useRouter();
