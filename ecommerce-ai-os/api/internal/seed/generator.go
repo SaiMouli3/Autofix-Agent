@@ -1013,7 +1013,7 @@ func (g *gen) inventory() {
 // ---------------------------------------------------------------- marketing
 
 var channelCTR = map[string]float64{"google": 0.048, "meta": 0.012, "instagram": 0.009, "email": 0.031, "whatsapp": 0.072}
-var channelCPM = map[string]float64{"google": 7, "meta": 4.8, "instagram": 5.3, "email": 0.13, "whatsapp": 1}
+var channelCPM = map[string]float64{"google": 45, "meta": 11, "instagram": 9, "email": 0.6, "whatsapp": 8}
 var channelConv = map[string]float64{"google": 0.041, "meta": 0.021, "instagram": 0.017, "email": 0.052, "whatsapp": 0.064, "organic": 0.034, "direct": 0.046}
 
 func (g *gen) marketingMetrics() {

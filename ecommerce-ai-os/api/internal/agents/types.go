@@ -208,12 +208,17 @@ func USD(v float64) string {
 	}
 }
 
-// USDFull formats dollars with US thousands separators: $12,345.
+// USDFull formats dollars with US thousands separators: $12,345, or $49.99
+// for amounts under $1,000 that carry cents (price points).
 func USDFull(v float64) string {
+	sign := ""
 	if v < 0 {
-		return "-$" + Num(-v)
+		sign, v = "-", -v
 	}
-	return "$" + Num(v)
+	if c := math.Round(v * 100); v < 1000 && math.Mod(c, 100) != 0 {
+		return fmt.Sprintf("%s$%.2f", sign, c/100)
+	}
+	return sign + "$" + Num(v)
 }
 
 func Pct1(v float64) string { return fmt.Sprintf("%.1f%%", v) }

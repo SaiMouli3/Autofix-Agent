@@ -176,7 +176,7 @@ func AnalyzeMarketing(c *Ctx) Result {
 		campRows = append(campRows, H{"id": cp.ID, "name": cp.Name, "channel": cp.Channel, "channelLabel": channelLabels[cp.Channel], "status": cp.Status,
 			"objective": cp.Objective, "dailyBudget": cp.DailyBudget,
 			"spend": analytics.Round(a.spend, 0), "revenue": analytics.Round(a.revenue, 0), "roas": analytics.Round(roas, 2), "roasChange": analytics.Round(analytics.Pct(roas, roasPrev), 1),
-			"ctr": analytics.Round(analytics.Ratio(a.clicks, a.impressions)*100, 2), "cpc": analytics.Round(analytics.Ratio(a.spend, a.clicks), 1),
+			"ctr": analytics.Round(analytics.Ratio(a.clicks, a.impressions)*100, 2), "cpc": analytics.Round(analytics.Ratio(a.spend, a.clicks), 2),
 			"orders": a.orders, "cac": analytics.Round(analytics.Ratio(a.spend, a.newCustomers), 0), "impressions": a.impressions, "clicks": a.clicks})
 	}
 	sort.Slice(campRows, func(i, j int) bool { return campRows[i]["spend"].(float64) > campRows[j]["spend"].(float64) })
