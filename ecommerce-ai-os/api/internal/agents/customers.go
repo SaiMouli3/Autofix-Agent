@@ -295,15 +295,15 @@ func AnalyzeCustomers(c *Ctx) Result {
 	}
 
 	insights := customersInsights(c, profiles)
-	health := 0.4*analytics.Score(repeatRate, 40, 15) + 0.35*analytics.Score(analytics.Ratio(float64(churnNow), float64(totalNow))*100, 5, 25) + 0.25*analytics.Score(analytics.Pct(float64(newCur), float64(newPrev)), 15, -25)
-	healthPrev := 0.4*analytics.Score(repeatRatePrev, 40, 15) + 0.35*analytics.Score(analytics.Ratio(float64(churnPrev), float64(len(prevSet)))*100, 5, 25) + 0.25*50
+	health := 0.4*analytics.Score(repeatRate, 36, 12) + 0.35*analytics.Score(analytics.Ratio(float64(churnNow), float64(totalNow))*100, 6, 32) + 0.25*analytics.Score(analytics.Pct(float64(newCur), float64(newPrev)), 15, -25)
+	healthPrev := 0.4*analytics.Score(repeatRatePrev, 36, 12) + 0.35*analytics.Score(analytics.Ratio(float64(churnPrev), float64(len(prevSet)))*100, 6, 32) + 0.25*50
 
 	view := H{
 		"kpis": kpis, "growth": sb.rows(), "segments": segments, "cohorts": cohorts,
 		"ltvDistribution": ltvDist, "frequency": freqDist, "geo": geoRows, "topCustomers": top,
 		"healthBreakdown": []H{
-			{"label": "Repeat purchase", "score": math.Round(analytics.Score(repeatRate, 40, 15))},
-			{"label": "Retention", "score": math.Round(analytics.Score(analytics.Ratio(float64(churnNow), float64(totalNow))*100, 5, 25))},
+			{"label": "Repeat purchase", "score": math.Round(analytics.Score(repeatRate, 36, 12))},
+			{"label": "Retention", "score": math.Round(analytics.Score(analytics.Ratio(float64(churnNow), float64(totalNow))*100, 6, 32))},
 			{"label": "Acquisition", "score": math.Round(analytics.Score(analytics.Pct(float64(newCur), float64(newPrev)), 15, -25))},
 		},
 	}

@@ -113,7 +113,6 @@ func AnalyzeOrders(c *Ctx) Result {
 		switch o.Status {
 		case model.OrderDelivered, model.OrderReturned:
 			cur.delivered++
-			sb.add("delivered", o.CreatedAt, 1)
 		case model.OrderRTO:
 			cur.rto++
 		case model.OrderCancelled:
@@ -206,6 +205,13 @@ func AnalyzeOrders(c *Ctx) Result {
 			}
 		}
 	}
+	// Deliveries are plotted on the day they happened, so recent orders
+	// still in transit don't read as a delivery collapse.
+	for i := range ds.Shipments {
+		if d := ds.Shipments[i].DeliveredAt; d != nil {
+			sb.add("delivered", *d, 1)
+		}
+	}
 	for _, rf := range ds.Refunds {
 		if r.Contains(rf.CreatedAt) {
 			cur.refunded += rf.Amount
@@ -279,7 +285,7 @@ func AnalyzeOrders(c *Ctx) Result {
 
 	insights := ordersInsights(c)
 
-	health := 0.45*analytics.Score(onTimeRate, 0.95, 0.7) + 0.35*analytics.Score(rtoRate, 0.04, 0.16) + 0.2*analytics.Score(ndrRate, 0.03, 0.12)
+	health := 0.45*analytics.Score(onTimeRate, 0.93, 0.6) + 0.35*analytics.Score(rtoRate, 0.04, 0.16) + 0.2*analytics.Score(ndrRate, 0.03, 0.12)
 	healthPrev := ordersHealthWindow(c, c.Now.Add(-7*24*time.Hour))
 
 	view := H{
@@ -295,7 +301,7 @@ func AnalyzeOrders(c *Ctx) Result {
 		},
 		"rates": H{"onTime": analytics.Round(onTimeRate*100, 1), "rto": analytics.Round(rtoRate*100, 1), "ndr": analytics.Round(ndrRate*100, 1)},
 		"healthBreakdown": []H{
-			{"label": "On-time delivery", "score": math.Round(analytics.Score(onTimeRate, 0.95, 0.7))},
+			{"label": "On-time delivery", "score": math.Round(analytics.Score(onTimeRate, 0.93, 0.6))},
 			{"label": "RTO control", "score": math.Round(analytics.Score(rtoRate, 0.04, 0.16))},
 			{"label": "NDR control", "score": math.Round(analytics.Score(ndrRate, 0.03, 0.12))},
 		},
@@ -336,7 +342,7 @@ func ordersHealthWindow(c *Ctx, end time.Time) float64 {
 			rto++
 		}
 	}
-	return 0.45*analytics.Score(onTime/math.Max(delivered, 1), 0.95, 0.7) + 0.35*analytics.Score(rto/math.Max(closed, 1), 0.04, 0.16) + 0.2*analytics.Score(ndr/math.Max(orders, 1), 0.03, 0.12)
+	return 0.45*analytics.Score(onTime/math.Max(delivered, 1), 0.93, 0.6) + 0.35*analytics.Score(rto/math.Max(closed, 1), 0.04, 0.16) + 0.2*analytics.Score(ndr/math.Max(orders, 1), 0.03, 0.12)
 }
 
 func ordersInsights(c *Ctx) []Insight {

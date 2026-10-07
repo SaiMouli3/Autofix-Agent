@@ -209,7 +209,7 @@ func AnalyzePricing(c *Ctx) Result {
 	}
 
 	avgIndex := indexSum / math.Max(float64(len(pids)), 1)
-	health := 0.5*analytics.Score(math.Abs(avgIndex-100), 2, 12) + 0.5*analytics.Score(float64(len(changes)), 2, 14)
+	health := 0.5*analytics.Score(math.Abs(avgIndex-100), 2, 12) + 0.5*analytics.Score(float64(len(changes)), 3, 24)
 	view := H{
 		"kpis": []KPI{
 			NewKPI("tracked", "Tracked products", float64(len(pids)), float64(len(pids)), "number", "up"),
@@ -221,7 +221,7 @@ func AnalyzePricing(c *Ctx) Result {
 		"positioning": []H{{"position": "Premium", "count": premium}, {"position": "At market", "count": atMarket}, {"position": "Value", "count": value}},
 		"healthBreakdown": []H{
 			{"label": "Price alignment", "score": math.Round(analytics.Score(math.Abs(avgIndex-100), 2, 12))},
-			{"label": "Market stability", "score": math.Round(analytics.Score(float64(len(changes)), 2, 14))},
+			{"label": "Market stability", "score": math.Round(analytics.Score(float64(len(changes)), 3, 24))},
 		},
 	}
 	view["kpis"].([]KPI)[1].Hint = "100 = market median"

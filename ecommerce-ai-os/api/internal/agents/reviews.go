@@ -145,16 +145,16 @@ func AnalyzeReviews(c *Ctx) Result {
 	}
 
 	insights := reviewsInsights(c)
-	health := 0.55*analytics.Score(avg, 4.6, 3.6) + 0.3*analytics.Score(negPct, 5, 25) + 0.15*analytics.Score(math.Min(respRate, 100), 90, 20)
-	healthPrev := 0.55*analytics.Score(avgPrev, 4.6, 3.6) + 0.3*analytics.Score(negPrev, 5, 25) + 0.15*analytics.Score(math.Min(respPrev, 100), 90, 20)
+	health := 0.55*analytics.Score(avg, 4.5, 3.3) + 0.3*analytics.Score(negPct, 5, 32) + 0.15*analytics.Score(math.Min(respRate, 100), 90, 20)
+	healthPrev := 0.55*analytics.Score(avgPrev, 4.5, 3.3) + 0.3*analytics.Score(negPrev, 5, 32) + 0.15*analytics.Score(math.Min(respPrev, 100), 90, 20)
 	view := H{
 		"kpis": kpis, "trend": sb.rows(), "stars": starRows,
 		"sentiment":      []H{{"label": "Positive", "count": cur.pos}, {"label": "Neutral", "count": cur.n - cur.pos - cur.neg}, {"label": "Negative", "count": cur.neg}},
 		"negativeThemes": themes(themeNeg, negTotal), "positiveThemes": themes(themePos, posTotal),
 		"lowestRated": prodRows, "recent": recentRows,
 		"healthBreakdown": []H{
-			{"label": "Average rating", "score": math.Round(analytics.Score(avg, 4.6, 3.6))},
-			{"label": "Negative share", "score": math.Round(analytics.Score(negPct, 5, 25))},
+			{"label": "Average rating", "score": math.Round(analytics.Score(avg, 4.5, 3.3))},
+			{"label": "Negative share", "score": math.Round(analytics.Score(negPct, 5, 32))},
 			{"label": "Response coverage", "score": math.Round(analytics.Score(math.Min(respRate, 100), 90, 20))},
 		},
 	}

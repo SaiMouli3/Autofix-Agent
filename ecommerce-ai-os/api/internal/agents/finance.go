@@ -160,8 +160,13 @@ func AnalyzeFinance(c *Ctx) Result {
 			pair.p.CashOut = pair.p.Inventory + pair.p.Expenses
 		}
 	}
-	buckets := r.Buckets()
-	rows := ComputePnL(ds, len(buckets), r.Bucket)
+	buckets := trendBuckets(r)
+	rows := ComputePnL(ds, len(buckets), func(t time.Time) int {
+		if i := r.Bucket(t); i < len(buckets) {
+			return i
+		}
+		return -1
+	})
 	if r.Granularity == "hour" {
 		day := windowPnL(ds, analytics.StartOfDay(r.From), analytics.StartOfDay(r.From).Add(24*time.Hour))
 		for i := range rows {

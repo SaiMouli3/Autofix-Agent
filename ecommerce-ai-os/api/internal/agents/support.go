@@ -245,14 +245,14 @@ func AnalyzeSupport(c *Ctx) Result {
 	insights := supportInsights(c, clusters)
 	slaRate := analytics.Ratio(float64(cur.n-cur.breaches), float64(cur.n)) * 100
 	slaPrev := analytics.Ratio(float64(prev.n-prev.breaches), float64(prev.n)) * 100
-	health := 0.45*analytics.Score(slaRate, 95, 70) + 0.3*analytics.Score(frAvg, 0.5, 4) + 0.25*analytics.Score(analytics.Ratio(float64(cur.escalated), float64(cur.n))*100, 3, 20)
-	healthPrev := 0.45*analytics.Score(slaPrev, 95, 70) + 0.3*analytics.Score(frPrev, 0.5, 4) + 0.25*analytics.Score(analytics.Ratio(float64(prev.escalated), float64(prev.n))*100, 3, 20)
+	health := 0.45*analytics.Score(slaRate, 95, 50) + 0.3*analytics.Score(frAvg, 0.5, 6) + 0.25*analytics.Score(analytics.Ratio(float64(cur.escalated), float64(cur.n))*100, 3, 20)
+	healthPrev := 0.45*analytics.Score(slaPrev, 95, 50) + 0.3*analytics.Score(frPrev, 0.5, 6) + 0.25*analytics.Score(analytics.Ratio(float64(prev.escalated), float64(prev.n))*100, 3, 20)
 	view := H{
 		"kpis": kpis, "trend": sb.rows(), "categories": catRows, "channels": chRows, "backlogAge": ageRows,
 		"clusters": clusterRows, "sla": H{"firstResponseHours": SLAFirstResponseH, "resolutionHours": SLAResolutionH, "withinSla": analytics.Round(slaRate, 1)},
 		"healthBreakdown": []H{
-			{"label": "SLA compliance", "score": math.Round(analytics.Score(slaRate, 95, 70))},
-			{"label": "Response speed", "score": math.Round(analytics.Score(frAvg, 0.5, 4))},
+			{"label": "SLA compliance", "score": math.Round(analytics.Score(slaRate, 95, 50))},
+			{"label": "Response speed", "score": math.Round(analytics.Score(frAvg, 0.5, 6))},
 			{"label": "Escalation control", "score": math.Round(analytics.Score(analytics.Ratio(float64(cur.escalated), float64(cur.n))*100, 3, 20))},
 		},
 	}

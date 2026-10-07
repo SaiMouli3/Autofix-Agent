@@ -282,11 +282,29 @@ type seriesBuilder struct {
 }
 
 func newSeries(r analytics.Range, keys ...string) *seriesBuilder {
-	b := &seriesBuilder{r: r, buckets: r.Buckets(), vals: map[string][]float64{}, keys: keys}
+	b := &seriesBuilder{r: r, buckets: trendBuckets(r), vals: map[string][]float64{}, keys: keys}
 	for _, k := range keys {
 		b.vals[k] = make([]float64, len(b.buckets))
 	}
 	return b
+}
+
+// trendBuckets returns chart buckets for the range without a trailing
+// partial day/week, so trend lines don't show a false collapse at the end.
+func trendBuckets(r analytics.Range) []time.Time {
+	buckets := r.Buckets()
+	// Drop a trailing partial day/week so trend lines don't show a false
+	// collapse at the end; totals still include it.
+	if r.Granularity != "hour" && len(buckets) > 2 {
+		step := 24 * time.Hour
+		if r.Granularity == "week" {
+			step = 7 * 24 * time.Hour
+		}
+		if last := buckets[len(buckets)-1]; last.Add(step).After(r.To) {
+			buckets = buckets[:len(buckets)-1]
+		}
+	}
+	return buckets
 }
 
 func (s *seriesBuilder) add(key string, t time.Time, v float64) {

@@ -466,7 +466,8 @@ func (s *Server) insights(c *fiber.Ctx) error {
 	var changes []H
 	for _, id := range agents.AgentOrder {
 		for _, ch := range rep.Results[id].Changes {
-			if ch.Prev == 0 || math.IsInf(ch.Change, 0) {
+			// Skip tiny bases: +1100% on a count of 1 is noise, not change.
+			if ch.Prev == 0 || math.IsInf(ch.Change, 0) || (ch.Unit == "number" && math.Abs(ch.Prev) < 20) {
 				continue
 			}
 			good := (ch.Change > 0) == (ch.Direction == "up")

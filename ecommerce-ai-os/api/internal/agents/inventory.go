@@ -222,15 +222,15 @@ func AnalyzeInventory(c *Ctx) Result {
 	}
 	insights := inventoryInsights(c, rows)
 	riskShare := analytics.Ratio(float64(risk), float64(len(rows))) * 100
-	health := 0.45*analytics.Score(riskShare, 1, 10) + 0.3*analytics.Score(analytics.Ratio(deadValue+overValue, value)*100, 8, 40) + 0.25*analytics.Score(analytics.Ratio(float64(low), float64(len(rows)))*100, 5, 25)
-	healthPrev := 0.45*analytics.Score(analytics.Ratio(float64(prevStockouts), float64(len(rows)))*100, 1, 10) + 0.3*analytics.Score(analytics.Ratio(deadValue+overValue, value)*100, 8, 40) + 0.25*analytics.Score(analytics.Ratio(float64(prevLow), float64(len(rows)))*100, 5, 25)
+	health := 0.45*analytics.Score(riskShare, 1, 16) + 0.3*analytics.Score(analytics.Ratio(deadValue+overValue, value)*100, 10, 60) + 0.25*analytics.Score(analytics.Ratio(float64(low), float64(len(rows)))*100, 5, 35)
+	healthPrev := 0.45*analytics.Score(analytics.Ratio(float64(prevStockouts), float64(len(rows)))*100, 1, 16) + 0.3*analytics.Score(analytics.Ratio(deadValue+overValue, value)*100, 10, 60) + 0.25*analytics.Score(analytics.Ratio(float64(prevLow), float64(len(rows)))*100, 5, 35)
 	view := H{
 		"kpis": kpis, "trend": trend, "velocity": velocity, "forecast": forecast,
 		"projection": H{"rows": projected, "series": projSeries}, "riskMix": riskMix, "table": rows,
 		"healthBreakdown": []H{
-			{"label": "Stockout exposure", "score": math.Round(analytics.Score(riskShare, 1, 10))},
-			{"label": "Capital efficiency", "score": math.Round(analytics.Score(analytics.Ratio(deadValue+overValue, value)*100, 8, 40))},
-			{"label": "Low-stock control", "score": math.Round(analytics.Score(analytics.Ratio(float64(low), float64(len(rows)))*100, 5, 25))},
+			{"label": "Stockout exposure", "score": math.Round(analytics.Score(riskShare, 1, 16))},
+			{"label": "Capital efficiency", "score": math.Round(analytics.Score(analytics.Ratio(deadValue+overValue, value)*100, 10, 60))},
+			{"label": "Low-stock control", "score": math.Round(analytics.Score(analytics.Ratio(float64(low), float64(len(rows)))*100, 5, 35))},
 		},
 	}
 	changes := []Change{}
