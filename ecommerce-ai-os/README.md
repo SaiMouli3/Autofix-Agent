@@ -58,7 +58,7 @@ app). With Docker, put them in `ecommerce-ai-os/.env` (gitignored):
 # Experiential Labs gateway (preferred when set)
 EXP_LABS_API_KEY=xpl_...
 EXP_LABS_BASE_URL=https://api.experientiallabs.ai/v1
-EXP_LABS_MODEL=claude-opus-5-5   # model name as the gateway exposes it
+EXP_LABS_MODEL=claude-opus-5.5   # model ID as listed at GET {base}/models
 EXP_LABS_PROTOCOL=openai         # openai (/chat/completions) or anthropic (/messages)
 ```
 

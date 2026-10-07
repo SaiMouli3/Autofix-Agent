@@ -133,10 +133,10 @@ func (s *Service) Chat(ctx context.Context, st model.Store, rangeKey string, his
 		}
 		cctx, cancel := context.WithTimeout(ctx, 75*time.Second)
 		defer cancel()
-		text, err := s.LLM.Complete(cctx, system, history, 1600)
+		text, err := s.LLM.Complete(cctx, system, history, 4000)
 		if err == nil && text != "" {
 			answer, cites := extractCitations(text, rep, ds)
-			return &ChatReply{Answer: answer, Citations: cites, Suggestions: followUps(question), Engine: s.LLM.Model()}, nil
+			return &ChatReply{Answer: answer, Citations: dedupe(cites), Suggestions: followUps(question), Engine: s.LLM.Model()}, nil
 		}
 		slog.Warn("llm chat failed, using deterministic reasoner", "err", err)
 	}
@@ -435,10 +435,12 @@ func dedupe(c []Citation) []Citation {
 	seen := map[string]bool{}
 	var out []Citation
 	for _, x := range c {
-		if seen[x.Href+x.Label] {
+		// One chip per destination label: several insights about the same
+		// product should not render as repeated "View <product>" chips.
+		if seen[x.Label] {
 			continue
 		}
-		seen[x.Href+x.Label] = true
+		seen[x.Label] = true
 		out = append(out, x)
 	}
 	if len(out) > 5 {
@@ -481,7 +483,7 @@ func (s *Service) Brief(ctx context.Context, st model.Store, rep *agents.Report)
 	cctx, cancel := context.WithTimeout(ctx, 45*time.Second)
 	defer cancel()
 	text, err := s.LLM.Complete(cctx, "You write the executive brief for an e-commerce owner. Using ONLY the numbers in the context, write 3 short sentences: what changed, why, and the single most important action today. Plain text, no markdown, no citations.\n\n<business_context>\n"+string(bc)+"\n</business_context>",
-		[]llm.Message{{Role: "user", Content: "Write today's executive brief."}}, 400)
+		[]llm.Message{{Role: "user", Content: "Write today's executive brief."}}, 2000)
 	if err != nil || text == "" {
 		return det, "deterministic"
 	}
@@ -533,7 +535,7 @@ func (s *Service) DraftReviewResponse(ctx context.Context, st model.Store, revie
 		cctx, cancel := context.WithTimeout(ctx, 40*time.Second)
 		defer cancel()
 		text, err := s.LLM.Complete(cctx, "You draft public replies to customer reviews for a D2C brand. Write 2–4 warm, specific sentences in plain text: thank the customer by first name, acknowledge their exact point, and for critical reviews apologise and give a concrete next step (support@ email or WhatsApp) without making promises about refunds. Never invent policies, discounts or facts.",
-			[]llm.Message{{Role: "user", Content: prompt}}, 300)
+			[]llm.Message{{Role: "user", Content: prompt}}, 1200)
 		if err == nil && text != "" {
 			return text, s.LLM.Model(), nil
 		}

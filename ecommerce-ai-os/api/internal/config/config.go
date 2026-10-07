@@ -69,7 +69,8 @@ func Load() Config {
 		ExpLabsBaseURL:   get("EXP_LABS_BASE_URL", "https://api.experientiallabs.ai/v1"),
 		ExpLabsProtocol:  get("EXP_LABS_PROTOCOL", "openai"),
 	}
-	c.ExpLabsModel = get("EXP_LABS_MODEL", c.LLMModel)
+	// Gateway model IDs use dots (e.g. claude-opus-5.5).
+	c.ExpLabsModel = get("EXP_LABS_MODEL", "claude-opus-5.5")
 	c.CookieSecure = getBool("COOKIE_SECURE", c.Env == "production")
 	// Server-side refusal fallbacks are a first-party API feature; default
 	// them off when a custom gateway/base URL is configured.
