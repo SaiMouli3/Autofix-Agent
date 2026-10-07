@@ -272,13 +272,13 @@ func marketingInsights(c *Ctx) []Insight {
 	for id, a := range agg {
 		cr := analytics.Ratio(a[0].revenue, a[0].spend)
 		br := analytics.Ratio(a[1].revenue, a[1].spend)
-		if a[0].spend > 5000 && br > 0 {
+		if a[0].spend > 170 && br > 0 {
 			if drop := (br - cr) / br; drop > worstDrop {
 				worstDrop, worst = drop, id
 			}
 		}
 		cp := ds.CampaignByID[id]
-		if (cp.Channel == "google" || cp.Channel == "meta" || cp.Channel == "instagram") && cr > bestRoas && a[0].spend > 5000 && cr >= br*0.9 {
+		if (cp.Channel == "google" || cp.Channel == "meta" || cp.Channel == "instagram") && cr > bestRoas && a[0].spend > 170 && cr >= br*0.9 {
 			bestRoas, best = cr, id
 		}
 	}
@@ -305,12 +305,12 @@ func marketingInsights(c *Ctx) []Insight {
 			Summary: fmt.Sprintf("ROAS fell from %.1fx to %.1fx over the last 7 days while daily spend rose %.0f%%. CTR declined from %.2f%% to %.2f%%, a classic creative-fatigue pattern.", br, cr, spendCh, ctrB, ctrC),
 			Evidence: []Evidence{
 				EvC("ROAS (7d)", fmt.Sprintf("%.2fx", cr), -worstDrop*100, "pct", "bad"),
-				EvC("Daily spend", INR(a[0].spend/7), spendCh, "pct", "bad"),
+				EvC("Daily spend", USD(a[0].spend/7), spendCh, "pct", "bad"),
 				EvC("CTR", fmt.Sprintf("%.2f%%", ctrC), ctrC-ctrB, "pts", "bad"),
 				Ev("Orders (7d)", Num(a[0].orders)),
 			},
 			LikelyCause:    "Creative fatigue on a broad audience plus rising auction costs — spend scaled up after the festive period while conversion intent fell.",
-			Impact:         fmt.Sprintf("%s/month of spend below the %.1fx ROAS target", INR(wasted/7*30), TargetROAS),
+			Impact:         fmt.Sprintf("%s/month of spend below the %.1fx ROAS target", USD(wasted/7*30), TargetROAS),
 			ImpactValue:    -wasted / 7 * 30,
 			Recommendation: rec,
 			Actions: []Action{
@@ -328,9 +328,9 @@ func marketingInsights(c *Ctx) []Insight {
 		out = append(out, Insight{
 			ID: id, AgentID: "marketing", Severity: SevOpportunity,
 			Title:          fmt.Sprintf("%s is your most efficient paid campaign (%.1fx ROAS)", cp.Name, bestRoas),
-			Summary:        fmt.Sprintf("Stable performance over 4 weeks with %s in attributed revenue last week. There is room to scale before returns diminish.", INR(a[0].revenue)),
-			Evidence:       []Evidence{Ev("ROAS (7d)", fmt.Sprintf("%.2fx", bestRoas)), Ev("Spend (7d)", INR(a[0].spend)), Ev("Orders (7d)", Num(a[0].orders))},
-			Impact:         fmt.Sprintf("+%s/month revenue at a 20%% budget increase", INR(a[0].revenue*0.2*0.8/7*30)),
+			Summary:        fmt.Sprintf("Stable performance over 4 weeks with %s in attributed revenue last week. There is room to scale before returns diminish.", USD(a[0].revenue)),
+			Evidence:       []Evidence{Ev("ROAS (7d)", fmt.Sprintf("%.2fx", bestRoas)), Ev("Spend (7d)", USD(a[0].spend)), Ev("Orders (7d)", Num(a[0].orders))},
+			Impact:         fmt.Sprintf("+%s/month revenue at a 20%% budget increase", USD(a[0].revenue*0.2*0.8/7*30)),
 			ImpactValue:    a[0].revenue * 0.16 / 7 * 30,
 			Recommendation: "Increase budget by 20% and monitor marginal ROAS daily.",
 			Actions:        []Action{{Label: "Apply budget shift", Intent: "apply"}, {Label: "View campaign", Intent: "view", Href: "/agents/marketing?campaign=" + best}},

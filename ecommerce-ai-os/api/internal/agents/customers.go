@@ -243,7 +243,7 @@ func AnalyzeCustomers(c *Ctx) Result {
 	cohorts := buildCohorts(ds, profiles, now)
 
 	// LTV distribution & purchase frequency.
-	ltvBins := []float64{0, 1000, 2000, 3500, 5000, 7500, 10000, 15000, 25000}
+	ltvBins := []float64{0, 35, 70, 120, 170, 250, 350, 500, 850}
 	ltvCounts := make([]int, len(ltvBins))
 	freq := make([]int, 5)
 	for _, p := range profiles {
@@ -260,9 +260,9 @@ func AnalyzeCustomers(c *Ctx) Result {
 	}
 	var ltvDist []H
 	for i, lo := range ltvBins {
-		label := fmt.Sprintf("%s+", INR(lo))
+		label := fmt.Sprintf("%s+", USD(lo))
 		if i < len(ltvBins)-1 {
-			label = fmt.Sprintf("%s–%s", INR(lo), INR(ltvBins[i+1]))
+			label = fmt.Sprintf("%s–%s", USD(lo), USD(ltvBins[i+1]))
 		}
 		ltvDist = append(ltvDist, H{"bucket": label, "customers": ltvCounts[i]})
 	}
@@ -393,11 +393,11 @@ func customersInsights(c *Ctx, profiles []CustomerProfile) []Insight {
 			Summary: fmt.Sprintf("Based on each customer's personal purchase cycle, %s repeat customers are due for their next order. A timely reminder typically lifts conversion by 15–25%%.", Num(float64(likely))),
 			Evidence: []Evidence{
 				Ev("Customers due to repurchase", Num(float64(likely))),
-				Ev("Their average order value", INR(exp/float64(likely)/0.7)),
-				Ev("Expected revenue if nudged", INR(exp*0.2)),
+				Ev("Their average order value", USD(exp/float64(likely)/0.7)),
+				Ev("Expected revenue if nudged", USD(exp*0.2)),
 			},
 			LikelyCause:    "These customers' days-since-last-order now match their typical reorder interval.",
-			Impact:         fmt.Sprintf("+%s incremental revenue in the next 30 days", INR(exp*0.2)),
+			Impact:         fmt.Sprintf("+%s incremental revenue in the next 30 days", USD(exp*0.2)),
 			ImpactValue:    exp * 0.2,
 			Recommendation: "Send a personalised WhatsApp reminder featuring each customer's last-purchased category, with a 48-hour free-shipping offer.",
 			Actions: []Action{
@@ -411,7 +411,7 @@ func customersInsights(c *Ctx, profiles []CustomerProfile) []Insight {
 	vipLapsing := 0
 	vipValue := 0.0
 	for _, p := range profiles {
-		if p.Orders >= 3 && p.LTV >= 9000 && p.DaysSinceLast > 60 {
+		if p.Orders >= 3 && p.LTV >= 300 && p.DaysSinceLast > 60 {
 			vipLapsing++
 			vipValue += p.LTV
 		}
@@ -421,13 +421,13 @@ func customersInsights(c *Ctx, profiles []CustomerProfile) []Insight {
 		out = append(out, Insight{
 			ID: id, AgentID: "customers", Severity: SevImportant,
 			Title:   fmt.Sprintf("%d high-value customers haven't ordered in 60+ days", vipLapsing),
-			Summary: fmt.Sprintf("These customers have spent %s with you historically but have gone quiet. Win-back is far cheaper than acquiring equivalent new customers.", INR(vipValue)),
+			Summary: fmt.Sprintf("These customers have spent %s with you historically but have gone quiet. Win-back is far cheaper than acquiring equivalent new customers.", USD(vipValue)),
 			Evidence: []Evidence{
 				Ev("Lapsing high-value customers", Num(float64(vipLapsing))),
-				Ev("Their lifetime revenue", INR(vipValue)),
+				Ev("Their lifetime revenue", USD(vipValue)),
 			},
 			LikelyCause:    "Natural lapse after the festive purchase cycle; several also raised a support ticket in their last order.",
-			Impact:         fmt.Sprintf("%s annual revenue at risk", INR(vipValue/2)),
+			Impact:         fmt.Sprintf("%s annual revenue at risk", USD(vipValue/2)),
 			ImpactValue:    -vipValue / 24,
 			Recommendation: "Run a VIP win-back with early access to new arrivals and a personal note — avoid deep discounts for this segment.",
 			Actions: []Action{

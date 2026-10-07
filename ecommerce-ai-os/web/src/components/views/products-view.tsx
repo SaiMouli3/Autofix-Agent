@@ -1,7 +1,7 @@
 "use client";
 
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { inr, pct, relativeTime } from "@/lib/format";
+import { usd, pct, relativeTime } from "@/lib/format";
 import { cn } from "@/lib/cn";
 import { useProduct } from "@/lib/queries";
 import type { Insight, ProductStats, Range, Row, View } from "@/lib/types";
@@ -21,7 +21,7 @@ function HealthScorecard({ p, className }: { p: ProductStats; className?: string
       <div className="flex items-baseline justify-between">
         <div className="min-w-0">
           <div className="truncate text-[15px] font-semibold">{p.name}</div>
-          <div className="text-[12px] text-fg-3">{p.sku} · {p.category} · {inr(p.price, { compact: false })}</div>
+          <div className="text-[12px] text-fg-3">{p.sku} · {p.category} · {usd(p.price, { compact: false })}</div>
         </div>
         <div className="text-right">
           <div className="text-[28px] font-semibold leading-none tracking-tight tabular">{Math.round(p.health)}<span className="text-[13px] font-medium text-fg-3"> / 100</span></div>
@@ -33,7 +33,7 @@ function HealthScorecard({ p, className }: { p: ProductStats; className?: string
         { label: "Returns", score: s.returns }, { label: "Profit", score: s.profit },
       ]} />
       <div className="mt-4 grid grid-cols-3 gap-2 border-t border-border pt-3 text-[12px]">
-        <div><div className="text-fg-3">Revenue</div><div className="font-semibold tabular">{inr(p.revenue)}</div></div>
+        <div><div className="text-fg-3">Revenue</div><div className="font-semibold tabular">{usd(p.revenue)}</div></div>
         <div><div className="text-fg-3">Return rate</div><div className={cn("font-semibold tabular", p.returnRate > 12 && "text-crit-text")}>{pct(p.returnRate)}</div></div>
         <div><div className="text-fg-3">Rating</div><div className="font-semibold tabular">{p.rating ? `${p.rating.toFixed(2)}★` : "—"}</div></div>
       </div>
@@ -160,8 +160,8 @@ export function ProductsView({ view, insights, range }: { view: View; insights: 
               {(view.categories as Row[]).map((c) => (
                 <tr key={c.category} className="cursor-pointer hover:bg-surface-2" onClick={() => router.push(`/agents/products?tab=data&category=${encodeURIComponent(c.category)}`)}>
                   <td className="py-2.5 font-medium">{c.category}</td>
-                  <td className="text-right tabular">{inr(c.revenue)}</td>
-                  <td className="text-right tabular">{Number(c.units).toLocaleString("en-IN")}</td>
+                  <td className="text-right tabular">{usd(c.revenue)}</td>
+                  <td className="text-right tabular">{Number(c.units).toLocaleString("en-US")}</td>
                   <td className="text-right tabular">{pct(c.margin)}</td>
                   <td className={cn("text-right tabular", c.returnRate > 10 && "text-crit-text")}>{pct(c.returnRate)}</td>
                 </tr>

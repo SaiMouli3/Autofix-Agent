@@ -23,7 +23,7 @@ func TestRunReport(t *testing.T) {
 			t.Logf("%-10s health=%3.0f prev=%3.0f status=%s issues=%d opps=%d headline=%v", s.ID, s.Health, s.HealthPrev, s.Status, s.Issues, s.Opportunities, s.Headline.Value)
 		}
 		for _, b := range rep.Business {
-			t.Logf("BI [%s] %s (%s) src=%v", b.Severity, b.Title, INR(b.ImpactValue), b.Sources)
+			t.Logf("BI [%s] %s (%s) src=%v", b.Severity, b.Title, USD(b.ImpactValue), b.Sources)
 		}
 		for _, id := range AgentOrder {
 			for _, in := range rep.Results[id].Insights {

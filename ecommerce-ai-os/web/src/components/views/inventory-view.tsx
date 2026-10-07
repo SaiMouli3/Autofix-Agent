@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { cn } from "@/lib/cn";
-import { inr } from "@/lib/format";
+import { usd } from "@/lib/format";
 import type { Insight, Range, Row, StockRow, View } from "@/lib/types";
 import { BarChart, Donut, TrendChart } from "@/components/charts/charts";
 import { SERIES } from "@/components/charts/kit";
@@ -88,7 +88,7 @@ export function InventoryView({ view, insights, range }: { view: View; insights:
           <BarChart data={view.velocity} labelKey="name" valueKey="dailySales" tooltipLabel="Units / day"
             colorFor={(d) => (d.risk === "critical" || d.risk === "stockout" ? "var(--crit)" : "var(--series-1)")}
             onSelect={(d) => router.push(`/agents/products?product=${d.productId}`)} />
-          <p className="mt-2 text-[11.5px] text-fg-3">Red: at risk of stocking out. Total value on hand {inr((view.kpis[0]?.value as number) ?? 0)}.</p>
+          <p className="mt-2 text-[11.5px] text-fg-3">Red: at risk of stocking out. Total value on hand {usd((view.kpis[0]?.value as number) ?? 0)}.</p>
         </ChartCard>
       </div>
     </div>

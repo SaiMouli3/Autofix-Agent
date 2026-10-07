@@ -285,24 +285,24 @@ func pricingInsights(c *Ctx, snap compSnapshot) ([]Insight, string) {
 		if ours-theirs >= 0.25 && salesCh > -12 {
 			rec = fmt.Sprintf("Maintain price. You are %s the market median, but your %.1f★ rating (vs %.1f★) is holding demand. Reinforce quality messaging instead of discounting.", aboveBelow(gap), ours, theirs)
 		} else {
-			target := roundINR(best.to * 1.05)
-			rec = fmt.Sprintf("Narrow the gap rather than match: move from %s to %s (5%% above %s). Your rating advantage (%.1f★ vs %.1f★) supports a small premium, and sales are already down %.0f%%.", INRFull(p.Price), INRFull(target), comp.Name, ours, theirs, -salesCh)
+			target := roundUSD(best.to * 1.05)
+			rec = fmt.Sprintf("Narrow the gap rather than match: move from %s to %s (5%% above %s). Your rating advantage (%.1f★ vs %.1f★) supports a small premium, and sales are already down %.0f%%.", USDFull(p.Price), USDFull(target), comp.Name, ours, theirs, -salesCh)
 		}
 		monthlyRev := productMonthlyRevenue(ds, best.pid, now)
 		id := stableID("pricing", "cut", best.pid, best.cid)
 		out = append(out, Insight{
 			ID: id, AgentID: "pricing", Severity: SevMarket,
 			Title:   fmt.Sprintf("%s reduced price by %.0f%% on your %s competitor", comp.Name, -best.change, p.Name),
-			Summary: fmt.Sprintf("%s cut its equivalent product from %s to %s. You are now %.0f%% above them and %s the market median. Your daily unit sales have moved %s since the change.", comp.Name, INRFull(best.from), INRFull(best.to), gapA, aboveBelow(gap), Signed(salesCh)),
+			Summary: fmt.Sprintf("%s cut its equivalent product from %s to %s. You are now %.0f%% above them and %s the market median. Your daily unit sales have moved %s since the change.", comp.Name, USDFull(best.from), USDFull(best.to), gapA, aboveBelow(gap), Signed(salesCh)),
 			Evidence: []Evidence{
-				EvC(comp.Name+" price", INRFull(best.to), best.change, "pct", "bad"),
-				Ev("Your price", INRFull(p.Price)),
-				Ev("Market median", INRFull(med)),
+				EvC(comp.Name+" price", USDFull(best.to), best.change, "pct", "bad"),
+				Ev("Your price", USDFull(p.Price)),
+				Ev("Market median", USDFull(med)),
 				Ev("Your rating", fmt.Sprintf("%.1f★ (%d reviews) vs %.1f★", ours, nReviews, theirs)),
 				EvC("Your daily units since", fmt.Sprintf("%.1f/day", after), salesCh, "pct", "bad"),
 			},
 			LikelyCause:    fmt.Sprintf("%s is pushing a seasonal price reset in %s.", comp.Name, p.Category),
-			Impact:         fmt.Sprintf("%s/month revenue at risk at the current sales trend", INR(math.Max(0, -salesCh/100*monthlyRev))),
+			Impact:         fmt.Sprintf("%s/month revenue at risk at the current sales trend", USD(math.Max(0, -salesCh/100*monthlyRev))),
 			ImpactValue:    math.Min(0, salesCh/100*monthlyRev),
 			Recommendation: rec,
 			Actions: []Action{
@@ -355,9 +355,9 @@ func pricingInsights(c *Ctx, snap compSnapshot) ([]Insight, string) {
 				Ev("Gap to market median", fmt.Sprintf("%.0f%%", bestOpp.gap)),
 				Ev("Your rating vs market", fmt.Sprintf("%.1f★ vs %.1f★", bestOpp.ours, bestOpp.theirs)),
 			},
-			Impact:         fmt.Sprintf("+%s/month gross profit", INR(bestOpp.uplift)),
+			Impact:         fmt.Sprintf("+%s/month gross profit", USD(bestOpp.uplift)),
 			ImpactValue:    bestOpp.uplift,
-			Recommendation: fmt.Sprintf("Test a %.0f%% price increase (to %s) for 14 days and monitor conversion.", raise, INRFull(roundINR(p.Price*(1+raise/100)))),
+			Recommendation: fmt.Sprintf("Test a %.0f%% price increase (to %s) for 14 days and monitor conversion.", raise, USDFull(roundUSD(p.Price*(1+raise/100)))),
 			Actions:        []Action{{Label: "Review pricing", Intent: "investigate", Href: "/agents/pricing?product=" + bestOpp.pid}},
 			Entity:         &EntityRef{Type: "product", ID: bestOpp.pid, Name: p.Name},
 			DetectedAt:     detectedAt(now, id, 500), Confidence: 0.74,
@@ -388,7 +388,7 @@ func pricingInsights(c *Ctx, snap compSnapshot) ([]Insight, string) {
 	return out, featured
 }
 
-func roundINR(v float64) float64 { return math.Round(v/10)*10 - 1 }
+func roundUSD(v float64) float64 { return math.Round(v) - 0.01 }
 
 func aboveBelow(gap float64) string {
 	switch {

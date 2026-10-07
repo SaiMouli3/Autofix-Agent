@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Sparkles } from "lucide-react";
 import { cn } from "@/lib/cn";
-import { inr, pct, relativeTime, shortDate } from "@/lib/format";
+import { usd, pct, relativeTime, shortDate } from "@/lib/format";
 import type { Row } from "@/lib/types";
 import { DataTable } from "@/components/data-table/data-table";
 import { HealthPill, OrderStatus, RiskBadge, SegmentBadge, SentimentBadge, Stars, money } from "@/components/data-table/cells";
@@ -50,9 +50,9 @@ export function OrdersTable({ params }: P) {
         <div className="grid gap-4 rounded-lg border border-border bg-surface p-4 text-[12.5px] md:grid-cols-3">
           <div>
             <div className="eyebrow mb-1.5">Items</div>
-            {(r.items as Row[]).map((it) => <div key={it.productId} className="flex justify-between gap-3"><span className="truncate">{it.qty}× {it.name}</span><span className="tabular">{inr(it.price, { compact: false })}</span></div>)}
-            <div className="mt-2 flex justify-between border-t border-border pt-2 text-fg-3"><span>Discount</span><span className="tabular">−{inr(r.discount, { compact: false })}</span></div>
-            <div className="flex justify-between text-fg-3"><span>Shipping</span><span className="tabular">{inr(r.shippingFee, { compact: false })}</span></div>
+            {(r.items as Row[]).map((it) => <div key={it.productId} className="flex justify-between gap-3"><span className="truncate">{it.qty}× {it.name}</span><span className="tabular">{usd(it.price, { compact: false })}</span></div>)}
+            <div className="mt-2 flex justify-between border-t border-border pt-2 text-fg-3"><span>Discount</span><span className="tabular">−{usd(r.discount, { compact: false })}</span></div>
+            <div className="flex justify-between text-fg-3"><span>Shipping</span><span className="tabular">{usd(r.shippingFee, { compact: false })}</span></div>
           </div>
           <div>
             <div className="eyebrow mb-1.5">Fulfilment</div>
@@ -95,7 +95,7 @@ export function CustomersTable({ params }: P) {
         { key: "city", label: "City", render: (r) => `${r.city}, ${r.state}` },
         { key: "orders", label: "Orders", align: "right" },
         { key: "ltv", label: "Lifetime value", align: "right", render: (r) => money(r.ltv) },
-        { key: "aov", label: "AOV", align: "right", render: (r) => inr(r.aov, { compact: false }), hidden: true },
+        { key: "aov", label: "AOV", align: "right", render: (r) => usd(r.aov, { compact: false }), hidden: true },
         { key: "lastOrder", label: "Last order", render: (r) => relativeTime(r.lastOrder) },
         { key: "repurchaseScore", label: "Repurchase likelihood", align: "right", render: (r) => (r.repurchaseScore ? <span className={cn("font-medium", r.repurchaseScore >= 0.5 && "text-good-text")}>{Math.round(r.repurchaseScore * 100)}%</span> : <span className="text-fg-3">—</span>) },
         { key: "returns", label: "Returns", align: "right", hidden: true },
@@ -153,7 +153,7 @@ export function InventoryTable({ params }: P) {
         { key: "riskRank", label: "Risk", render: (r) => <InventoryRisk risk={r.risk} /> },
         { key: "reorderQty", label: "Suggested reorder", align: "right", render: (r) => (r.reorderQty ? <span className="font-medium">{r.reorderQty} units</span> : <span className="text-fg-3">—</span>) },
         { key: "leadTimeDays", label: "Lead time", align: "right", render: (r) => `${r.leadTimeDays}d` },
-        { key: "value", label: "Value (cost)", align: "right", render: (r) => inr(r.value), hidden: true },
+        { key: "value", label: "Value (cost)", align: "right", render: (r) => usd(r.value), hidden: true },
         { key: "reserved", label: "Reserved", align: "right", hidden: true },
       ]}
     />

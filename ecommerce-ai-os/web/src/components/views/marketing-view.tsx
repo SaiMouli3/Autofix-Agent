@@ -2,7 +2,7 @@
 
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { cn } from "@/lib/cn";
-import { inr, pct } from "@/lib/format";
+import { usd, pct } from "@/lib/format";
 import type { Insight, Range, Row, View } from "@/lib/types";
 import { BarChart, Funnel, TrendChart } from "@/components/charts/charts";
 import { Badge } from "@/components/ui/badge";
@@ -21,7 +21,7 @@ export function MarketingView({ view, insights, range }: { view: View; insights:
     <div className="space-y-4">
       <KpiStrip kpis={view.kpis} cols={7} />
       <div className="grid gap-4 lg:grid-cols-12">
-        <ChartCard title="Spend vs attributed revenue" question="Is every rupee of spend still returning revenue?" className="lg:col-span-7">
+        <ChartCard title="Spend vs attributed revenue" question="Is every dollar of spend still returning revenue?" className="lg:col-span-7">
           <TrendChart data={view.trend} granularity={range.granularity} unit="currency" height={260}
             series={[
               { key: "revenue", label: "Attributed revenue", color: "var(--series-3)", type: "area", unit: "currency" },
@@ -49,10 +49,10 @@ export function MarketingView({ view, insights, range }: { view: View; insights:
                 <tr key={c.id} className={cn("hover:bg-surface-2", highlighted === c.id && "bg-crit-soft")}>
                   <td className="px-5 py-2.5">
                     <div className="flex items-center gap-2"><Badge tone="outline">{c.channelLabel}</Badge><span className="max-w-[260px] truncate font-medium">{c.name}</span></div>
-                    <div className="mt-0.5 text-[11px] text-fg-3">{c.objective} · budget {inr(c.dailyBudget)}/day</div>
+                    <div className="mt-0.5 text-[11px] text-fg-3">{c.objective} · budget {usd(c.dailyBudget)}/day</div>
                   </td>
-                  <td className="text-right tabular">{inr(c.spend)}</td>
-                  <td className="text-right tabular">{inr(c.revenue)}</td>
+                  <td className="text-right tabular">{usd(c.spend)}</td>
+                  <td className="text-right tabular">{usd(c.revenue)}</td>
                   <td className="text-right">
                     <div className="flex items-center justify-end gap-1.5">
                       <span className={cn("font-semibold tabular", c.roas < view.targetRoas * 0.75 ? "text-crit-text" : c.roas >= view.targetRoas ? "text-good-text" : "")}>{c.roas.toFixed(2)}x</span>
@@ -60,9 +60,9 @@ export function MarketingView({ view, insights, range }: { view: View; insights:
                     </div>
                   </td>
                   <td className="text-right tabular">{pct(c.ctr, 2)}</td>
-                  <td className="text-right tabular">₹{c.cpc}</td>
+                  <td className="text-right tabular">{usd(c.cpc, { compact: false })}</td>
                   <td className="text-right tabular">{c.orders}</td>
-                  <td className="px-5 text-right tabular">{c.cac ? inr(c.cac) : "—"}</td>
+                  <td className="px-5 text-right tabular">{c.cac ? usd(c.cac) : "—"}</td>
                 </tr>
               ))}
             </tbody>

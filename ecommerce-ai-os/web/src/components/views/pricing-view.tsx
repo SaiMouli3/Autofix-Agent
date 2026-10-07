@@ -3,7 +3,7 @@
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { ArrowDownRight, ArrowUpRight } from "lucide-react";
 import { cn } from "@/lib/cn";
-import { inr, relativeTime } from "@/lib/format";
+import { usd, relativeTime } from "@/lib/format";
 import type { Insight, Range, Row, View } from "@/lib/types";
 import { BarChart, TrendChart } from "@/components/charts/charts";
 import { SERIES } from "@/components/charts/kit";
@@ -30,7 +30,7 @@ export function PricingView({ view, insights }: { view: View; insights: Insight[
       {featured?.productId && (
         <div className="grid gap-4 lg:grid-cols-12">
           <ChartCard title={`Price comparison · ${featured.name}`} question="Where does your price sit against each competitor today?" className="lg:col-span-5">
-            <BarChart data={bars} labelKey="name" valueKey="price" unit="currency" tooltipLabel="Price" refLine={{ y: featured.median, label: `Median ${inr(featured.median)}` }}
+            <BarChart data={bars} labelKey="name" valueKey="price" unit="currency" tooltipLabel="Price" refLine={{ y: featured.median, label: `Median ${usd(featured.median)}` }}
               colorFor={(d) => (d.ours ? "var(--series-7)" : "var(--series-muted)")} />
             <AiCallout insight={cut} className="mt-4" />
           </ChartCard>
@@ -55,8 +55,8 @@ export function PricingView({ view, insights }: { view: View; insights: Insight[
                   <tr key={p.productId} className={cn("cursor-pointer hover:bg-surface-2", selected === p.productId && "bg-accent-soft")}
                     onClick={() => router.push(`/agents/products?product=${p.productId}`)}>
                     <td className="px-5 py-2.5"><div className="max-w-[220px] truncate font-medium">{p.name}</div><div className="text-[11px] text-fg-3">{(p.competitors as Row[]).length} competitors</div></td>
-                    <td className="text-right tabular">{inr(p.ourPrice, { compact: false })}</td>
-                    <td className="text-right tabular text-fg-2">{inr(p.marketMedian, { compact: false })}</td>
+                    <td className="text-right tabular">{usd(p.ourPrice, { compact: false })}</td>
+                    <td className="text-right tabular text-fg-2">{usd(p.marketMedian, { compact: false })}</td>
                     <td className={cn("text-right font-medium tabular", p.gapPct > 4 ? "text-warn-text" : p.gapPct < -4 ? "text-info-text" : "text-fg-2")}>{p.gapPct > 0 ? "+" : ""}{p.gapPct}%</td>
                     <td className="text-right tabular">
                       <span className={cn(p.ourRating >= p.competitorRating ? "text-good-text" : "text-crit-text")}>{p.ourRating ? p.ourRating.toFixed(1) : "—"}</span>
@@ -79,7 +79,7 @@ export function PricingView({ view, insights }: { view: View; insights: Insight[
                   </span>
                   <div className="min-w-0 text-[12.5px]">
                     <div className="truncate"><span className="font-medium">{c.competitor}</span> · {c.product}</div>
-                    <div className="tabular text-fg-3">{inr(c.from, { compact: false })} → {inr(c.to, { compact: false })} ({c.change > 0 ? "+" : ""}{c.change}%) · {relativeTime(c.at)}</div>
+                    <div className="tabular text-fg-3">{usd(c.from, { compact: false })} → {usd(c.to, { compact: false })} ({c.change > 0 ? "+" : ""}{c.change}%) · {relativeTime(c.at)}</div>
                   </div>
                 </li>
               ))}

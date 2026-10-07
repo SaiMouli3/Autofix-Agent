@@ -7,7 +7,7 @@ import { toast } from "sonner";
 import { ArrowRight, ArrowUpRight, Check, ChevronRight, CircleDot, Lightbulb, Search, Sparkles, Undo2, UserPlus, X, Zap } from "lucide-react";
 import { agentHref, agentMeta, SEVERITY } from "@/lib/agents";
 import { cn } from "@/lib/cn";
-import { clockTime, inr, relativeTime } from "@/lib/format";
+import { clockTime, usd, relativeTime } from "@/lib/format";
 import { useCreateAction, useUpdateInsight } from "@/lib/queries";
 import type { Action, BusinessInsight, Evidence, Insight } from "@/lib/types";
 import { Button } from "@/components/ui/button";
@@ -205,7 +205,7 @@ export function PriorityItem({ insight, index }: { insight: BusinessInsight | In
             {insight.impactValue !== 0 && (
               <span className={cn("text-[12px] font-medium tabular", insight.impactValue < 0 ? "text-crit-text" : "text-good-text")}>
                 {insight.impactValue < 0 ? "" : "+"}
-                {inr(insight.impactValue)}/mo impact
+                {usd(insight.impactValue)}/mo impact
               </span>
             )}
           </div>
@@ -276,7 +276,7 @@ export function InsightSheet({ insight, open, onOpenChange }: { insight: Insight
                 {insight.impactValue !== 0 && (
                   <div className={cn("text-[22px] font-semibold tracking-tight tabular", insight.impactValue < 0 ? "text-crit-text" : "text-good-text")}>
                     {insight.impactValue > 0 ? "+" : ""}
-                    {inr(insight.impactValue)}<span className="text-[13px] font-medium text-fg-3"> / month</span>
+                    {usd(insight.impactValue)}<span className="text-[13px] font-medium text-fg-3"> / month</span>
                   </div>
                 )}
                 <p className="text-[13px] leading-relaxed text-fg-2">{insight.impact || "Not quantified yet."}</p>

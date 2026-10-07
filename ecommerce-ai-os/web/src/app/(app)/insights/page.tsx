@@ -5,7 +5,7 @@ import { useState } from "react";
 import { ArrowRight, ArrowUpRight, ArrowDownRight, Lightbulb, Sparkles, TrendingUp } from "lucide-react";
 import { agentHref, agentMeta, SEVERITY } from "@/lib/agents";
 import { cn } from "@/lib/cn";
-import { clockTime, formatChange, formatValue, inr } from "@/lib/format";
+import { clockTime, formatChange, formatValue, usd } from "@/lib/format";
 import { useInsights } from "@/lib/queries";
 import type { BusinessInsight, Severity } from "@/lib/types";
 import { AgentIcon } from "@/components/agents/primitives";
@@ -30,7 +30,7 @@ function ActionRow({ b, i }: { b: BusinessInsight; i: number }) {
         <span className={cn("mt-0.5 grid size-5 shrink-0 place-items-center rounded-full text-[10.5px] font-semibold text-white", SEVERITY[b.severity].dot)}>{i + 1}</span>
         <span className="min-w-0">
           <span className="block text-[13px] font-medium leading-snug">{b.recommendation}</span>
-          <span className="mt-0.5 block text-[11.5px] text-fg-3">{b.title}{b.impactValue ? ` · ${inr(Math.abs(b.impactValue))}/mo` : ""}</span>
+          <span className="mt-0.5 block text-[11.5px] text-fg-3">{b.title}{b.impactValue ? ` · ${usd(Math.abs(b.impactValue))}/mo` : ""}</span>
         </span>
       </button>
       <InsightSheet insight={b} open={open} onOpenChange={setOpen} />
@@ -141,7 +141,7 @@ export default function InsightsPage() {
                     <TrendingUp className="mt-0.5 size-4 shrink-0 text-good-text" />
                     <div className="min-w-0">
                       <div className="font-medium leading-snug">{b.title}</div>
-                      {b.impactValue > 0 && <div className="mt-0.5 font-medium text-good-text">+{inr(b.impactValue)}/mo potential</div>}
+                      {b.impactValue > 0 && <div className="mt-0.5 font-medium text-good-text">+{usd(b.impactValue)}/mo potential</div>}
                     </div>
                   </li>
                 ))}

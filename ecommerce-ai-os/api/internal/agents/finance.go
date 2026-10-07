@@ -20,7 +20,7 @@ var FinanceMeta = Meta{
 
 const (
 	gatewayFee  = 0.02
-	codHandling = 30.0
+	codHandling = 1.0
 	codLagDays  = 7
 )
 
@@ -281,7 +281,7 @@ func financeInsights(c *Ctx, cur, prev PnL) []Insight {
 				worst, worstD = l.label, d
 			}
 		}
-		ev = append(ev, EvC("Net revenue (14d)", INR(a.NetRevenue), revCh, "pct", map[bool]string{true: "good", false: "bad"}[revCh >= 0]))
+		ev = append(ev, EvC("Net revenue (14d)", USD(a.NetRevenue), revCh, "pct", map[bool]string{true: "good", false: "bad"}[revCh >= 0]))
 		ev = append(ev, EvC("Net margin", Pct1(a.NetMargin), marginCh, "pts", "bad"))
 		for _, l := range lines {
 			d := analytics.Ratio(l.a, a.GrossSales)*100 - analytics.Ratio(l.b, b.GrossSales)*100
@@ -300,7 +300,7 @@ func financeInsights(c *Ctx, cur, prev PnL) []Insight {
 			Summary:        fmt.Sprintf("Net margin moved from %.1f%% to %.1f%%. The biggest driver is %s, which grew %.1f points as a share of sales.", b.NetMargin, a.NetMargin, lower(worst), worstD),
 			Evidence:       ev,
 			LikelyCause:    fmt.Sprintf("%s is growing faster than revenue.", worst),
-			Impact:         fmt.Sprintf("%s/month of profit lost vs the prior run-rate", INR(lost)),
+			Impact:         fmt.Sprintf("%s/month of profit lost vs the prior run-rate", USD(lost)),
 			ImpactValue:    -lost,
 			Recommendation: "Address the cost drivers flagged by the Marketing and Product agents before scaling spend further.",
 			Actions:        []Action{{Label: "Investigate", Intent: "investigate", Href: "/agents/finance"}},
@@ -342,14 +342,14 @@ func financeInsights(c *Ctx, cur, prev PnL) []Insight {
 		out = append(out, Insight{
 			ID: id, AgentID: "finance", Severity: SevImportant,
 			Title:   fmt.Sprintf("Payment failure rate jumped to %.1f%%", rate3),
-			Summary: fmt.Sprintf("%.0f prepaid payment attempts failed in the last 3 days (%.1f%% vs a %.1f%% baseline), worth %s in attempted orders.", f3, rate3, rate14, INR(lostRev)),
+			Summary: fmt.Sprintf("%.0f prepaid payment attempts failed in the last 3 days (%.1f%% vs a %.1f%% baseline), worth %s in attempted orders.", f3, rate3, rate14, USD(lostRev)),
 			Evidence: []Evidence{
 				EvC("Failure rate (3d)", Pct1(rate3), rate3-rate14, "pts", "bad"),
 				Ev("Failed attempts", Num(f3)),
-				Ev("Attempted value", INR(lostRev)),
+				Ev("Attempted value", USD(lostRev)),
 			},
 			LikelyCause:    "Gateway-side degradation — failures are spread across products and customers, not tied to any one segment.",
-			Impact:         fmt.Sprintf("Up to %s/month in lost prepaid orders if it persists", INR(lostRev/3*30*0.35)),
+			Impact:         fmt.Sprintf("Up to %s/month in lost prepaid orders if it persists", USD(lostRev/3*30*0.35)),
 			ImpactValue:    -lostRev / 3 * 30 * 0.35,
 			Recommendation: "Raise a ticket with the payment gateway and enable the backup gateway for UPI and cards; send payment-retry links to failed checkouts.",
 			Actions:        []Action{{Label: "Investigate", Intent: "investigate", Href: "/agents/finance#payments"}, {Label: "Assign", Intent: "assign"}},
@@ -364,12 +364,12 @@ func financeInsights(c *Ctx, cur, prev PnL) []Insight {
 		out = append(out, Insight{
 			ID: id, AgentID: "finance", Severity: SevInfo,
 			Title:          fmt.Sprintf("Refunds now consume %.1f%% of sales", refundRate),
-			Summary:        fmt.Sprintf("Refunds were %s over the last 14 days, up from %.1f%% of sales in the prior 14.", INR(a.Refunds), refundPrev),
-			Evidence:       []Evidence{EvC("Refunds % of sales", Pct1(refundRate), refundRate-refundPrev, "pts", "bad"), Ev("Refunds (14d)", INR(a.Refunds))},
+			Summary:        fmt.Sprintf("Refunds were %s over the last 14 days, up from %.1f%% of sales in the prior 14.", USD(a.Refunds), refundPrev),
+			Evidence:       []Evidence{EvC("Refunds % of sales", Pct1(refundRate), refundRate-refundPrev, "pts", "bad"), Ev("Refunds (14d)", USD(a.Refunds))},
 			Recommendation: "See the Product agent's return-spike finding — fixing the root cause product addresses most of this.",
 			Actions:        []Action{{Label: "View returns", Intent: "view", Href: "/agents/orders?tab=data&status=returned"}},
 			ImpactValue:    -(refundRate - refundPrev) / 100 * a.GrossSales / 14 * 30,
-			Impact:         fmt.Sprintf("%s/month extra refunds", INR((refundRate-refundPrev)/100*a.GrossSales/14*30)),
+			Impact:         fmt.Sprintf("%s/month extra refunds", USD((refundRate-refundPrev)/100*a.GrossSales/14*30)),
 			DetectedAt:     detectedAt(now, id, 500), Confidence: 0.9,
 		})
 	}

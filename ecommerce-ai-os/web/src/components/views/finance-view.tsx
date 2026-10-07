@@ -1,7 +1,7 @@
 "use client";
 
 import { cn } from "@/lib/cn";
-import { inr } from "@/lib/format";
+import { usd } from "@/lib/format";
 import type { Insight, Range, Row, View } from "@/lib/types";
 import { Donut, TrendChart, Waterfall } from "@/components/charts/charts";
 import { AiCallout, ChartCard, KpiStrip } from "./common";
@@ -41,7 +41,7 @@ export function FinanceView({ view, insights, range }: { view: View; insights: I
       </div>
       <AiCallout insight={margin} />
       <div className="grid gap-4 lg:grid-cols-12">
-        <ChartCard title="From sales to profit" question="Where does each rupee of gross sales go?" className="lg:col-span-7">
+        <ChartCard title="From sales to profit" question="Where does each dollar of gross sales go?" className="lg:col-span-7">
           <Waterfall steps={view.waterfall} />
         </ChartCard>
         <ChartCard title="Expense breakdown" question="Cost lines as a share of gross sales" className="lg:col-span-5">
@@ -71,9 +71,9 @@ export function FinanceView({ view, insights, range }: { view: View; insights: I
         <ChartCard title="Unit economics per order" question="What does an average order really earn?" className="lg:col-span-4">
           <dl className="space-y-2 text-[13px]">
             {[["Average order value", per.aov, false], ["Cost of goods", -per.cogs, true], ["Shipping", -per.shipping, true], ["Marketing", -per.marketing, true], ["Refunds", -per.refunds, true]].map(([l, v, neg]) => (
-              <div key={String(l)} className="flex justify-between"><dt className="text-fg-2">{String(l)}</dt><dd className={cn("tabular", neg && "text-fg-2")}>{inr(Number(v), { compact: false })}</dd></div>
+              <div key={String(l)} className="flex justify-between"><dt className="text-fg-2">{String(l)}</dt><dd className={cn("tabular", neg && "text-fg-2")}>{usd(Number(v), { compact: false })}</dd></div>
             ))}
-            <div className="flex justify-between border-t border-border pt-2 font-semibold"><dt>Contribution / order</dt><dd className={cn("tabular", per.contribution < 0 ? "text-crit-text" : "text-good-text")}>{inr(per.contribution, { compact: false })}</dd></div>
+            <div className="flex justify-between border-t border-border pt-2 font-semibold"><dt>Contribution / order</dt><dd className={cn("tabular", per.contribution < 0 ? "text-crit-text" : "text-good-text")}>{usd(per.contribution, { compact: false })}</dd></div>
           </dl>
         </ChartCard>
       </div>

@@ -335,7 +335,7 @@ func supportInsights(c *Ctx, clusters []*cluster) []Insight {
 			LikelyCause:    row["rootCause"].(string),
 			Recommendation: "Fix the root cause once instead of resolving tickets one by one: publish a macro response, and route the cluster to the owning team.",
 			Impact:         "Each unresolved complaint raises churn risk for that customer by roughly 2×",
-			ImpactValue:    -float64(len(cl.Tickets)) * 2400,
+			ImpactValue:    -float64(len(cl.Tickets)) * 80,
 			Actions: []Action{
 				{Label: "Open cluster", Intent: "investigate", Href: "/agents/support?cluster=" + cl.Key},
 				{Label: "Assign", Intent: "assign"},

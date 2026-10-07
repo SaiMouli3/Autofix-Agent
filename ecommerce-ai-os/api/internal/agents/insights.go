@@ -117,7 +117,7 @@ func AnalyzeBusiness(c *Ctx, results map[string]*Result) (Result, []BusinessInsi
 					Title:    fmt.Sprintf("Potential product-quality issue: %s", pr.Entity.Name),
 					Summary:  fmt.Sprintf("Three independent signals point to the same product over the same 14 days: returns are up, negative reviews describe fit and fabric problems, and support is handling a cluster of identical complaints."),
 					Evidence: ev, LikelyCause: pr.LikelyCause,
-					Impact:         fmt.Sprintf("%s/month estimated revenue impact (refunds + lost conversion)", INR(-impact)),
+					Impact:         fmt.Sprintf("%s/month estimated revenue impact (refunds + lost conversion)", USD(-impact)),
 					ImpactValue:    impact,
 					Recommendation: fmt.Sprintf("Investigate the latest supplier batch from %s and pause paid promotion of this product until QC clears it.%s", supplier, map[bool]string{true: " Update size guidance on the listing today.", false: ""}[strings.Contains(pr.LikelyCause, "Size")]),
 					Actions: []Action{
@@ -175,7 +175,7 @@ func AnalyzeBusiness(c *Ctx, results map[string]*Result) (Result, []BusinessInsi
 				Title:    fmt.Sprintf("Courier failure is driving delays, complaints and RTO in one region"),
 				Summary:  fmt.Sprintf("%s The same window shows delivery complaints and a rising RTO rate%s.", od.Summary, map[bool]string{true: ", and industry news confirms capacity issues in the region", false: ""}[mk != nil]),
 				Evidence: ev, LikelyCause: od.LikelyCause,
-				Impact:         fmt.Sprintf("%s/month in RTO losses, reshipping and churn risk", INR(-impact)),
+				Impact:         fmt.Sprintf("%s/month in RTO losses, reshipping and churn risk", USD(-impact)),
 				ImpactValue:    impact,
 				Recommendation: od.Recommendation,
 				Actions: []Action{
@@ -222,7 +222,7 @@ func AnalyzeBusiness(c *Ctx, results map[string]*Result) (Result, []BusinessInsi
 				Sources: []string{"marketing", "finance"},
 			},
 			Observation: mk.Title, Chain: chain,
-			WhyChanged: "Spend scaled after the festive peak while purchase intent fell, so each rupee buys fewer orders.",
+			WhyChanged: "Spend scaled after the festive peak while purchase intent fell, so each dollar buys fewer orders.",
 			Category:   "risk", SourceInsights: srcs,
 		})
 	}
@@ -349,7 +349,7 @@ func AnalyzeBusiness(c *Ctx, results map[string]*Result) (Result, []BusinessInsi
 				WhyChanged: in.LikelyCause, Category: cat, SourceInsights: []string{in.ID}})
 		}
 	}
-	// Prioritise: severity then absolute ₹ impact.
+	// Prioritise: severity then absolute $ impact.
 	plain := make([]Insight, len(out))
 	for i := range out {
 		plain[i] = out[i].Insight

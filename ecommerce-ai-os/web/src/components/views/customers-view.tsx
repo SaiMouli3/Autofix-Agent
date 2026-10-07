@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { cn } from "@/lib/cn";
-import { inr, relativeTime } from "@/lib/format";
+import { usd, relativeTime } from "@/lib/format";
 import type { Insight, Range, View } from "@/lib/types";
 import { BarChart, CohortHeatmap, TrendChart } from "@/components/charts/charts";
 import { IndiaTileMap } from "@/components/charts/special";
@@ -41,10 +41,10 @@ export function CustomersView({ view, insights, range }: { view: View; insights:
                     <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-surface-3">
                       <div className={cn("h-full rounded-full", s.segment === "At Risk" || s.segment === "Churn Risk" ? "bg-warn" : "bg-[var(--series-1)]")} style={{ width: `${(s.customers / maxC) * 100}%` }} />
                     </div>
-                    <span className="w-14 text-right font-medium tabular">{s.customers.toLocaleString("en-IN")}</span>
+                    <span className="w-14 text-right font-medium tabular">{s.customers.toLocaleString("en-US")}</span>
                     <span className="w-12 text-right tabular text-fg-3">{s.share}%</span>
                   </div>
-                  <div className="mt-0.5 pl-[96px] text-[11px] text-fg-3">{SEG_DESC[s.segment]} · avg LTV {inr(s.avgLtv)}</div>
+                  <div className="mt-0.5 pl-[96px] text-[11px] text-fg-3">{SEG_DESC[s.segment]} · avg LTV {usd(s.avgLtv)}</div>
                 </button>
               </li>
             ))}
@@ -66,7 +66,7 @@ export function CustomersView({ view, insights, range }: { view: View; insights:
         </ChartCard>
         <ChartCard title="Where your customers are" question="Customer concentration by state" className="lg:col-span-8">
           <IndiaTileMap data={view.geo} valueKey="customers" label="Customers"
-            extra={(d) => <div className="mt-1 text-fg-2">Revenue: <span className="tabular text-fg">{inr(Number(d.revenue))}</span> · avg LTV {inr(Number(d.avgLtv))}</div>} />
+            extra={(d) => <div className="mt-1 text-fg-2">Revenue: <span className="tabular text-fg">{usd(Number(d.revenue))}</span> · avg LTV {usd(Number(d.avgLtv))}</div>} />
         </ChartCard>
       </div>
       <ChartCard title="Most valuable customers" question="Your highest lifetime-value customers">
@@ -81,7 +81,7 @@ export function CustomersView({ view, insights, range }: { view: View; insights:
                   <td className="py-2.5"><div className="font-medium">{c.name}</div><div className="text-[11.5px] text-fg-3">{c.city}, {c.state}</div></td>
                   <td><SegmentBadge segment={c.segment} /></td>
                   <td className="text-right tabular">{c.orders}</td>
-                  <td className="text-right font-medium tabular">{inr(c.ltv, { compact: false })}</td>
+                  <td className="text-right font-medium tabular">{usd(c.ltv, { compact: false })}</td>
                   <td className="text-right text-fg-3">{relativeTime(c.lastOrder)}</td>
                 </tr>
               ))}

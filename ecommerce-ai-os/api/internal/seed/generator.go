@@ -128,15 +128,12 @@ func cumulative(w []float64) []float64 {
 func round2(v float64) float64 { return math.Round(v*100) / 100 }
 
 func roundPrice(v float64) float64 {
-	// Indian retail price points end in 9.
-	step := 100.0
-	switch {
-	case v < 1000:
-		step = 10
-	case v < 3000:
-		step = 50
+	// US retail price points end in .99 (half-dollar steps for low prices).
+	step := 1.0
+	if v < 10 {
+		step = 0.5
 	}
-	return math.Max(99, math.Round(v/step)*step-1)
+	return round2(math.Max(2.99, math.Round(v/step)*step-0.01))
 }
 
 func (g *gen) normal(mean, sd float64) float64 { return mean + g.r.NormFloat64()*sd }
@@ -430,8 +427,8 @@ func (g *gen) orders() {
 			case g.chance(0.24):
 				o.Discount = round2(o.Subtotal * 0.1)
 			}
-			if o.Subtotal-o.Discount < 999 {
-				o.ShippingFee = 79
+			if o.Subtotal-o.Discount < 35 {
+				o.ShippingFee = 4.99
 			}
 			o.Total = round2(o.Subtotal - o.Discount + o.ShippingFee)
 			// Payment
@@ -523,7 +520,7 @@ func (g *gen) fulfilment() {
 			Region:     region,
 			PromisedAt: o.CreatedAt.AddDate(0, 0, sla),
 			Status:     model.OrderProcessing,
-			Cost:       math.Round(g.uniform(55, 85)),
+			Cost:       round2(g.uniform(1.8, 2.9)),
 		}
 		shipped := o.CreatedAt.Add(time.Duration(4+g.r.Intn(36)) * time.Hour)
 		if shipped.After(g.now) {
@@ -803,7 +800,7 @@ var posThemeW = cumulative([]float64{30, 18, 14, 14, 10, 14})
 
 var reviewBank = map[string]map[string][][2]string{
 	"positive": {
-		"Quality":      {{"Excellent quality", "The %s feels genuinely premium. Finishing is neat and it has held up well after regular use."}, {"Worth every rupee", "Really impressed with the build of this %s. Better than what I expected at this price."}},
+		"Quality":      {{"Excellent quality", "The %s feels genuinely premium. Finishing is neat and it has held up well after regular use."}, {"Worth every penny", "Really impressed with the build of this %s. Better than what I expected at this price."}},
 		"Value":        {{"Great value", "For the price this %s is hard to beat. Already recommended it to two friends."}, {"Good buy", "Bought the %s during the sale and it was a steal. Will buy again."}},
 		"Fit & sizing": {{"Fits perfectly", "Followed the size chart and the %s fits exactly as expected. Comfortable all day."}, {"True to size", "The %s is true to size and the fit is flattering."}},
 		"Delivery":     {{"Super fast delivery", "Ordered the %s on Monday and it arrived Wednesday. Smooth experience."}, {"Quick and safe", "The %s reached earlier than promised and was well protected."}},
@@ -885,7 +882,7 @@ func (g *gen) addTicket(o *model.Order, productID, category string, complaint bo
 	if complaint && g.chance(0.11) || cluster != "" && g.chance(0.2) {
 		t.Escalated = true
 	}
-	if t.Escalated || o.Total > 5000 {
+	if t.Escalated || o.Total > 170 {
 		t.Priority = "high"
 	}
 	if category == "Product enquiry" {
@@ -1016,7 +1013,7 @@ func (g *gen) inventory() {
 // ---------------------------------------------------------------- marketing
 
 var channelCTR = map[string]float64{"google": 0.048, "meta": 0.012, "instagram": 0.009, "email": 0.031, "whatsapp": 0.072}
-var channelCPM = map[string]float64{"google": 210, "meta": 145, "instagram": 160, "email": 4, "whatsapp": 30}
+var channelCPM = map[string]float64{"google": 7, "meta": 4.8, "instagram": 5.3, "email": 0.13, "whatsapp": 1}
 var channelConv = map[string]float64{"google": 0.041, "meta": 0.021, "instagram": 0.017, "email": 0.052, "whatsapp": 0.064, "organic": 0.034, "direct": 0.046}
 
 func (g *gen) marketingMetrics() {
@@ -1077,7 +1074,7 @@ func (g *gen) marketingMetrics() {
 			clicks := int(float64(impressions) * ctr)
 			g.ds.CampMetrics = append(g.ds.CampMetrics, model.CampaignMetric{CampaignID: c.ID, Date: g.day(d), Spend: round2(spend), Impressions: impressions, Clicks: clicks})
 			if d == Days-1 {
-				g.ds.Campaigns[ci].DailyBudget = math.Round(spend*1.2/100) * 100
+				g.ds.Campaigns[ci].DailyBudget = math.Round(spend*1.2/10) * 10
 			}
 		}
 	}
@@ -1201,9 +1198,9 @@ func (g *gen) competitors() {
 func (g *gen) finance() {
 	for d := 0; d < Days; d++ {
 		frac := float64(d) / float64(Days-1)
-		opex := (36000 + 7000*frac) * g.uniform(0.95, 1.05)
+		opex := (1200 + 235*frac) * g.uniform(0.95, 1.05)
 		if g.day(d).Day() == 1 {
-			opex += 145000 // monthly rent & payroll true-up
+			opex += 4800 // monthly rent & payroll true-up
 		}
 		failRate := g.uniform(0.05, 0.075)
 		if d >= Days-3 {
@@ -1215,7 +1212,7 @@ func (g *gen) finance() {
 			opex *= g.now.Sub(g.day(d)).Hours() / 24
 		}
 		g.ds.Finance = append(g.ds.Finance, model.FinancialDaily{
-			Date: g.day(d), Opex: round2(opex), PaymentFailures: fails, FailedAmount: round2(float64(fails) * g.uniform(1500, 2100)),
+			Date: g.day(d), Opex: round2(opex), PaymentFailures: fails, FailedAmount: round2(float64(fails) * g.uniform(50, 70)),
 		})
 	}
 }
@@ -1252,12 +1249,12 @@ func (g *gen) news() {
 			"Shift East-bound volume to the best-performing courier until transit times normalise.", "Swiftline", 88},
 		{4.1, "Draft consumer-protection guidance targets misleading sale countdowns and drip pricing", "Policy Brief India", "Regulation", "medium",
 			"A draft advisory proposes clearer disclosure of total price (including shipping and COD fees) at the start of checkout and restrictions on fake urgency timers.",
-			"Your checkout adds shipping fees at the final step for orders under ₹999 and uses countdown banners during sales.",
+			"Your checkout adds shipping fees at the final step for orders under $35 and uses countdown banners during sales.",
 			"Audit checkout and sale banners now; showing all-inclusive prices early also tends to reduce COD refusals.", "", 74},
 		{5.5, "Shoppers increasingly prefer UPI over cash on delivery, survey finds", "Fintech Times", "Consumer", "medium",
 			"A consumer survey finds prepaid adoption rising across age groups when brands offer small prepaid incentives and fast refunds.",
 			"COD orders carry most of your RTO losses; nudging prepaid could lift margins directly.",
-			"Test a ₹50 prepaid incentive on COD-heavy regions and measure RTO change.", "", 79},
+			"Test a $2 prepaid incentive on COD-heavy regions and measure RTO change.", "", 79},
 		{6.8, fmt.Sprintf("%s raises funding to expand quick delivery in metro cities", compB), "Startup Wire", "Competitor", "medium",
 			fmt.Sprintf("%s announced fresh funding to build dark stores enabling same-day delivery in six metros.", compB),
 			"Faster delivery expectations in metros may raise the bar for your 2–4 day delivery promise.",

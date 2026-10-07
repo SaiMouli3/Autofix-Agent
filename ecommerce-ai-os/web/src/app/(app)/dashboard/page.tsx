@@ -5,7 +5,7 @@ import { useState } from "react";
 import { ArrowRight, ArrowUpRight, Sparkles } from "lucide-react";
 import { SEVERITY } from "@/lib/agents";
 import { cn } from "@/lib/cn";
-import { clockTime, greeting, inr } from "@/lib/format";
+import { clockTime, greeting, usd } from "@/lib/format";
 import { useDashboard, useMe } from "@/lib/queries";
 import { useAppStore } from "@/lib/store";
 import type { Severity } from "@/lib/types";
@@ -194,7 +194,7 @@ export default function DashboardPage() {
             <span className="grid size-10 place-items-center rounded-xl bg-accent text-white dark:text-[#0b0b10]"><Sparkles className="size-5" /></span>
             <div className="min-w-0 flex-1">
               <div className="text-[14px] font-semibold">Business Insights Agent</div>
-              <div className="text-[12.5px] text-fg-2">Connects findings from all ten agents · {data.business.issues} issues · {data.business.opportunities} opportunities · {inr(data.priority.reduce((s, p) => s + Math.abs(p.impactValue), 0))}/mo at stake in top priorities</div>
+              <div className="text-[12.5px] text-fg-2">Connects findings from all ten agents · {data.business.issues} issues · {data.business.opportunities} opportunities · {usd(data.priority.reduce((s, p) => s + Math.abs(p.impactValue), 0))}/mo at stake in top priorities</div>
             </div>
             <ArrowRight className="size-4 text-accent-text" />
           </Link>

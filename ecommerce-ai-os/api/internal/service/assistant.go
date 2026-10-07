@@ -69,11 +69,11 @@ func businessContext(rep *agents.Report, ds *model.Dataset) map[string]any {
 	prod := rep.Results["products"].View
 	top := []string{}
 	for _, p := range prod["top"].([]agents.ProductStats) {
-		top = append(top, fmt.Sprintf("%s (id %s): revenue ₹%.0f, growth %+.0f%%, margin %.0f%%, return rate %.1f%%, rating %.1f, health %.0f", p.Name, p.ID, p.Revenue, p.Growth, p.Margin, p.ReturnRate, p.Rating, p.Health))
+		top = append(top, fmt.Sprintf("%s (id %s): revenue $%.0f, growth %+.0f%%, margin %.0f%%, return rate %.1f%%, rating %.1f, health %.0f", p.Name, p.ID, p.Revenue, p.Growth, p.Margin, p.ReturnRate, p.Rating, p.Health))
 	}
 	worst := []string{}
 	for _, p := range prod["worst"].([]agents.ProductStats) {
-		worst = append(worst, fmt.Sprintf("%s (id %s): health %.0f, revenue ₹%.0f, return rate %.1f%%, rating %.1f, growth %+.0f%%", p.Name, p.ID, p.Health, p.Revenue, p.ReturnRate, p.Rating, p.Growth))
+		worst = append(worst, fmt.Sprintf("%s (id %s): health %.0f, revenue $%.0f, return rate %.1f%%, rating %.1f, growth %+.0f%%", p.Name, p.ID, p.Health, p.Revenue, p.ReturnRate, p.Rating, p.Growth))
 	}
 	stock := []string{}
 	for _, r := range rep.Results["inventory"].View["table"].([]agents.StockRow) {
@@ -85,7 +85,7 @@ func businessContext(rep *agents.Report, ds *model.Dataset) map[string]any {
 		stock = stock[:12]
 	}
 	return map[string]any{
-		"store": ds.Store.Name, "businessType": ds.Store.BusinessType, "currency": "INR",
+		"store": ds.Store.Name, "businessType": ds.Store.BusinessType, "currency": "USD",
 		"period": rep.Range.Label, "generatedAt": rep.Now.Format(time.RFC1123),
 		"businessHealth": map[string]any{"score": health, "previous": prev, "segments": segs},
 		"kpis":           k, "agents": agentsCtx, "insights": ins,
@@ -109,7 +109,7 @@ const systemPrompt = `You are the AI operations analyst inside "E-commerce AI OS
 Rules:
 - Never invent numbers. Every figure you state must appear in the context. If the context does not contain the answer, say what is known and which agent page to check.
 - Lead with the direct answer in one or two sentences, then give supporting points as a short bulleted list (at most 5 bullets), then one clear recommended next step.
-- Use Indian number formatting for rupees (₹, lakh "L", crore "Cr").
+- Use US dollar formatting ($, thousands separators, K/M/B abbreviations).
 - Cite your sources inline using these exact markers, placed right after the claim they support: [[insight:INSIGHT_ID]] for an agent finding, [[agent:AGENT_ID]] for an agent page, [[product:PRODUCT_ID]] for a product.
 - Be concise, specific and calm. No preamble, no sign-off.`
 
@@ -280,7 +280,7 @@ func deterministicAnswer(question string, rep *agents.Report, ds *model.Dataset)
 			dir = "rose"
 		}
 		fmt.Fprintf(&b, "Revenue %s **%.1f%%** to **%s** over %s, driven mainly by order volume (%+.1f%%) rather than basket size (AOV %+.1f%%).\n\n",
-			dir, abs(rev.Change), agents.INR(rev.Value), strings.ToLower(rep.Range.Label), ord.Change, aov.Change)
+			dir, abs(rev.Change), agents.USD(rev.Value), strings.ToLower(rep.Range.Label), ord.Change, aov.Change)
 		b.WriteString("What the agents see behind it:\n")
 		n := 0
 		for _, id := range []string{"marketing", "products", "pricing", "inventory", "customers"} {
@@ -359,7 +359,7 @@ func deterministicAnswer(question string, rep *agents.Report, ds *model.Dataset)
 				if i >= 5 {
 					break
 				}
-				fmt.Fprintf(&b, "- %v · %v: ₹%.0f → ₹%.0f (%+.0f%%)\n", c["competitor"], c["product"], c["from"], c["to"], c["change"])
+				fmt.Fprintf(&b, "- %v · %v: $%.2f → $%.2f (%+.0f%%)\n", c["competitor"], c["product"], c["from"], c["to"], c["change"])
 			}
 		}
 	case has(q, "critical", "problem", "issue", "wrong"):
@@ -401,7 +401,7 @@ func deterministicAnswer(question string, rep *agents.Report, ds *model.Dataset)
 	case has(q, "profit", "margin", "money", "cash", "finance"):
 		p := rep.Results["finance"].View["pnl"].(agents.PnL)
 		fmt.Fprintf(&b, "For %s you made **%s net profit** on **%s net revenue** — a **%.1f%% net margin** (gross margin %.1f%%).\n\n",
-			strings.ToLower(rep.Range.Label), agents.INR(p.NetProfit), agents.INR(p.NetRevenue), p.NetMargin, p.GrossMargin)
+			strings.ToLower(rep.Range.Label), agents.USD(p.NetProfit), agents.USD(p.NetRevenue), p.NetMargin, p.GrossMargin)
 		for _, in := range agentInsights("finance") {
 			b.WriteString(bullet(in) + "\n")
 			cite(in)
@@ -409,7 +409,7 @@ func deterministicAnswer(question string, rep *agents.Report, ds *model.Dataset)
 	case has(q, "product") && has(q, "bad", "worst", "poor", "under", "perform"):
 		b.WriteString("Products performing worst (by product health score):\n\n")
 		for _, p := range rep.Results["products"].View["worst"].([]agents.ProductStats) {
-			fmt.Fprintf(&b, "- **%s** — health %.0f/100 · revenue %s · return rate %.1f%% · rating %.1f★\n", p.Name, p.Health, agents.INR(p.Revenue), p.ReturnRate, p.Rating)
+			fmt.Fprintf(&b, "- **%s** — health %.0f/100 · revenue %s · return rate %.1f%% · rating %.1f★\n", p.Name, p.Health, agents.USD(p.Revenue), p.ReturnRate, p.Rating)
 			cites = append(cites, Citation{Label: "View " + p.Name, Href: "/agents/products?product=" + p.ID, AgentID: "products"})
 			if len(cites) >= 4 {
 				break

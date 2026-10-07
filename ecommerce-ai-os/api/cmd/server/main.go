@@ -119,7 +119,7 @@ func seedDemo(ctx context.Context, svc *service.Service) error {
 	}
 	if len(stores) == 0 {
 		start := time.Now()
-		st, err := svc.CreateDemoStore(ctx, u.OrgID, "fashion", "Loomline — India")
+		st, err := svc.CreateDemoStore(ctx, u.OrgID, "fashion", "Loomline")
 		if err != nil {
 			return err
 		}

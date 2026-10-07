@@ -174,8 +174,8 @@ func AnalyzeInventory(c *Ctx) Result {
 		NewKPI("dead", "Dead stock", float64(dead), 0, "number", "down"),
 	}
 	kpis[0].Hint = "Valued at cost"
-	kpis[4].Hint = fmt.Sprintf("%s tied up", INR(overValue))
-	kpis[5].Hint = fmt.Sprintf("%s tied up", INR(deadValue))
+	kpis[4].Hint = fmt.Sprintf("%s tied up", USD(overValue))
+	kpis[5].Hint = fmt.Sprintf("%s tied up", USD(deadValue))
 
 	// Velocity: top movers.
 	vel := append([]StockRow(nil), rows...)
@@ -331,7 +331,7 @@ func inventoryInsights(c *Ctx, rows []StockRow) []Insight {
 				Ev("Lead time", fmt.Sprintf("%d days", x.LeadTime)),
 			},
 			LikelyCause:    "Demand accelerated faster than the reorder point assumed; the last replenishment was sized for the earlier sales rate.",
-			Impact:         fmt.Sprintf("%s in lost sales during the stockout window", INR(lost)),
+			Impact:         fmt.Sprintf("%s in lost sales during the stockout window", USD(lost)),
 			ImpactValue:    -lost,
 			Recommendation: fmt.Sprintf("Raise a purchase order for %s units today and request expedited dispatch; throttle discounting on this SKU until stock lands.", Num(float64(x.ReorderQty))),
 			Actions: []Action{
@@ -358,7 +358,7 @@ func inventoryInsights(c *Ctx, rows []StockRow) []Insight {
 			Title:          fmt.Sprintf("%s is out of stock", x.Name),
 			Summary:        fmt.Sprintf("Demand of %.1f units/day is going unfulfilled. Back-in-stock alerts can recapture part of this demand.", x.DailySales),
 			Evidence:       []Evidence{Ev("Recent demand", fmt.Sprintf("%.1f units/day", x.DailySales)), Ev("Lead time", fmt.Sprintf("%d days", x.LeadTime))},
-			Impact:         fmt.Sprintf("%s/month in lost sales", INR(lost)),
+			Impact:         fmt.Sprintf("%s/month in lost sales", USD(lost)),
 			ImpactValue:    -lost,
 			Recommendation: fmt.Sprintf("Reorder %s units and enable WhatsApp back-in-stock alerts.", Num(float64(x.ReorderQty))),
 			Actions:        []Action{{Label: "Create purchase order", Intent: "apply"}, {Label: "View inventory", Intent: "view", Href: "/agents/inventory?tab=data&risk=stockout"}},
@@ -377,11 +377,11 @@ func inventoryInsights(c *Ctx, rows []StockRow) []Insight {
 		id := stableID("inventory", "dead")
 		out = append(out, Insight{
 			ID: id, AgentID: "inventory", Severity: SevOpportunity,
-			Title:          fmt.Sprintf("%s of working capital is tied up in %d dead-stock SKUs", INR(deadV), deadN),
+			Title:          fmt.Sprintf("%s of working capital is tied up in %d dead-stock SKUs", USD(deadV), deadN),
 			Summary:        "These products sold one unit or fewer in the last 28 days while holding significant stock.",
-			Evidence:       []Evidence{Ev("Dead-stock SKUs", Num(float64(deadN))), Ev("Value at cost", INR(deadV))},
+			Evidence:       []Evidence{Ev("Dead-stock SKUs", Num(float64(deadN))), Ev("Value at cost", USD(deadV))},
 			Recommendation: "Bundle dead stock with best-sellers or run a clearance collection; release capital toward fast movers.",
-			Impact:         fmt.Sprintf("Up to %s cash released", INR(deadV*0.7)),
+			Impact:         fmt.Sprintf("Up to %s cash released", USD(deadV*0.7)),
 			ImpactValue:    deadV * 0.25,
 			Actions:        []Action{{Label: "View dead stock", Intent: "view", Href: "/agents/inventory?tab=data&risk=dead"}},
 			DetectedAt:     detectedAt(now, id, 700), Confidence: 0.95,

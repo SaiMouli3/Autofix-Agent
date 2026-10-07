@@ -2,7 +2,7 @@
 
 import { Star } from "lucide-react";
 import { cn } from "@/lib/cn";
-import { inr, shortDate } from "@/lib/format";
+import { usd, shortDate } from "@/lib/format";
 import { Badge } from "@/components/ui/badge";
 
 const ORDER_STATUS: Record<string, { label: string; tone: "good" | "warn" | "crit" | "info" | "neutral" }> = {
@@ -48,7 +48,7 @@ export function Stars({ rating, className }: { rating: number; className?: strin
   );
 }
 
-export const money = (v: number) => <span className="font-medium">{inr(v, { compact: false })}</span>;
+export const money = (v: number) => <span className="font-medium">{usd(v, { compact: false })}</span>;
 export const date = (v?: string | null) => (v ? shortDate(v) : <span className="text-fg-3">—</span>);
 
 export function SegmentBadge({ segment }: { segment: string }) {

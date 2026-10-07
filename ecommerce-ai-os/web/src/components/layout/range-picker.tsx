@@ -28,7 +28,7 @@ export function RangePicker({ className }: { className?: string }) {
   const [cf, setCf] = useState(from ?? iso(new Date(today.getTime() - 13 * 86400e3)));
   const [ct, setCt] = useState(to ?? iso(today));
   const label = range === "custom" && from && to
-    ? `${new Date(from).toLocaleDateString("en-IN", { day: "numeric", month: "short" })} – ${new Date(to).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}`
+    ? `${new Date(from).toLocaleDateString("en-US", { month: "short", day: "numeric" })} – ${new Date(to).toLocaleDateString("en-US", { month: "short", day: "numeric" })}`
     : PRESETS.find((p) => p.key === range)?.label ?? "Last 30 days";
   const invalid = !cf || !ct || cf > ct;
   return (

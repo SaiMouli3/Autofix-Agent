@@ -5,7 +5,7 @@ import { use, useMemo } from "react";
 import { Sparkles } from "lucide-react";
 import { AGENTS } from "@/lib/agents";
 import { cn } from "@/lib/cn";
-import { formatValue, inr } from "@/lib/format";
+import { formatValue, usd } from "@/lib/format";
 import { useAgent } from "@/lib/queries";
 import { useAppStore } from "@/lib/store";
 import type { AgentDetail, Insight } from "@/lib/types";
@@ -57,7 +57,7 @@ function Recommendations({ insights }: { insights: Insight[] }) {
           <div className="min-w-0 flex-1">
             <p className="text-[14px] font-semibold leading-snug">{r.recommendation}</p>
             <p className="mt-1 text-[12.5px] text-fg-3">Because: {r.title}</p>
-            {r.impact && <p className={cn("mt-1 text-[12.5px] font-medium", r.impactValue < 0 ? "text-crit-text" : "text-good-text")}>{r.impactValue !== 0 ? `${r.impactValue > 0 ? "+" : ""}${inr(r.impactValue)}/mo · ` : ""}{r.impact}</p>}
+            {r.impact && <p className={cn("mt-1 text-[12.5px] font-medium", r.impactValue < 0 ? "text-crit-text" : "text-good-text")}>{r.impactValue !== 0 ? `${r.impactValue > 0 ? "+" : ""}${usd(r.impactValue)}/mo · ` : ""}{r.impact}</p>}
             <div className="mt-3"><InsightActions insight={r} size="xs" /></div>
           </div>
         </li>

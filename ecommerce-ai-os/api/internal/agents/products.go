@@ -177,8 +177,8 @@ func AnalyzeProducts(c *Ctx) Result {
 	view := H{
 		"top":         topBy(stats, 8, func(a, b ProductStats) bool { return a.Revenue > b.Revenue }, nil),
 		"worst":       topBy(stats, 6, func(a, b ProductStats) bool { return a.Health < b.Health }, minRev),
-		"fastest":     topBy(stats, 6, func(a, b ProductStats) bool { return a.Growth > b.Growth }, func(s ProductStats) bool { return s.PrevRevenue > 5000 }),
-		"declining":   topBy(stats, 6, func(a, b ProductStats) bool { return a.Growth < b.Growth }, func(s ProductStats) bool { return s.PrevRevenue > 5000 }),
+		"fastest":     topBy(stats, 6, func(a, b ProductStats) bool { return a.Growth > b.Growth }, func(s ProductStats) bool { return s.PrevRevenue > 170 }),
+		"declining":   topBy(stats, 6, func(a, b ProductStats) bool { return a.Growth < b.Growth }, func(s ProductStats) bool { return s.PrevRevenue > 170 }),
 		"returnHeavy": topBy(stats, 6, func(a, b ProductStats) bool { return a.ReturnRate > b.ReturnRate }, minRev),
 		"highProfit":  topBy(stats, 6, func(a, b ProductStats) bool { return a.GrossProfit > b.GrossProfit }, nil),
 	}
@@ -460,7 +460,7 @@ func productsInsights(c *Ctx, rangeStats []ProductStats) []Insight {
 				EvC("Store-wide returns (daily)", fmt.Sprintf("%.1f/day", totRet[0]/14), storeRetChange, "pct", map[bool]string{true: "bad", false: "neutral"}[storeRetChange > 0]),
 			},
 			LikelyCause:    fmt.Sprintf("Return reasons are dominated by \"%s\" — a product-specification issue, likely linked to the latest batch from %s.", topReason, p.Supplier),
-			Impact:         fmt.Sprintf("%s/month in refunds and reverse logistics", INR(-impact*1.15)),
+			Impact:         fmt.Sprintf("%s/month in refunds and reverse logistics", USD(-impact*1.15)),
 			ImpactValue:    impact * 1.15,
 			Recommendation: fmt.Sprintf("Inspect the latest %s batch against spec%s, and hold the next purchase order until QC sign-off.", p.Supplier, map[bool]string{true: ", update the size guidance on the product page", false: ", pull a sample for quality testing"}[strings.HasPrefix(topReason, "Size")]),
 			Actions: []Action{
@@ -477,7 +477,7 @@ func productsInsights(c *Ctx, rangeStats []ProductStats) []Insight {
 	var fast, slow *ProductStats
 	for i := range g {
 		s := &g[i]
-		if s.PrevRevenue < 15000 {
+		if s.PrevRevenue < 500 {
 			continue
 		}
 		if fast == nil || s.Growth > fast.Growth {
@@ -501,14 +501,14 @@ func productsInsights(c *Ctx, rangeStats []ProductStats) []Insight {
 		out = append(out, Insight{
 			ID: id, AgentID: "products", Severity: SevOpportunity,
 			Title:   fmt.Sprintf("%s is your fastest-growing product (+%.0f%%)", fast.Name, fast.Growth),
-			Summary: fmt.Sprintf("Revenue grew from %s to %s over the last 28 days with a %.0f%% gross margin.", INR(fast.PrevRevenue), INR(fast.Revenue), fast.Margin),
+			Summary: fmt.Sprintf("Revenue grew from %s to %s over the last 28 days with a %.0f%% gross margin.", USD(fast.PrevRevenue), USD(fast.Revenue), fast.Margin),
 			Evidence: []Evidence{
-				EvC("Revenue (28d)", INR(fast.Revenue), fast.Growth, "pct", "good"),
+				EvC("Revenue (28d)", USD(fast.Revenue), fast.Growth, "pct", "good"),
 				Ev("Gross margin", Pct1(fast.Margin)),
 				Ev("Stock cover", fmt.Sprintf("%.0f days", daysLeft)),
 			},
 			Recommendation: rec,
-			Impact:         fmt.Sprintf("+%s/month if momentum is sustained", INR(fast.Revenue-fast.PrevRevenue)),
+			Impact:         fmt.Sprintf("+%s/month if momentum is sustained", USD(fast.Revenue-fast.PrevRevenue)),
 			ImpactValue:    fast.Revenue - fast.PrevRevenue,
 			Actions:        []Action{{Label: "View product", Intent: "view", Href: "/agents/products?product=" + fast.ID}},
 			Entity:         &EntityRef{Type: "product", ID: fast.ID, Name: fast.Name},
@@ -520,15 +520,15 @@ func productsInsights(c *Ctx, rangeStats []ProductStats) []Insight {
 		out = append(out, Insight{
 			ID: id, AgentID: "products", Severity: SevImportant,
 			Title:   fmt.Sprintf("%s revenue declined %.0f%%", slow.Name, -slow.Growth),
-			Summary: fmt.Sprintf("Revenue fell from %s to %s over the last 28 days. Rating %.1f★, return rate %.1f%%.", INR(slow.PrevRevenue), INR(slow.Revenue), slow.Rating, slow.ReturnRate),
+			Summary: fmt.Sprintf("Revenue fell from %s to %s over the last 28 days. Rating %.1f★, return rate %.1f%%.", USD(slow.PrevRevenue), USD(slow.Revenue), slow.Rating, slow.ReturnRate),
 			Evidence: []Evidence{
-				EvC("Revenue (28d)", INR(slow.Revenue), slow.Growth, "pct", "bad"),
+				EvC("Revenue (28d)", USD(slow.Revenue), slow.Growth, "pct", "bad"),
 				Ev("Rating", fmt.Sprintf("%.1f★", slow.Rating)),
 			},
 			LikelyCause:    "Demand shift — no quality signals (complaints, returns) explain the decline.",
 			Recommendation: "Refresh imagery and test a bundle with a best-seller before considering markdowns.",
 			ImpactValue:    slow.Revenue - slow.PrevRevenue,
-			Impact:         fmt.Sprintf("%s/month revenue lost vs prior period", INR(slow.PrevRevenue-slow.Revenue)),
+			Impact:         fmt.Sprintf("%s/month revenue lost vs prior period", USD(slow.PrevRevenue-slow.Revenue)),
 			Actions:        []Action{{Label: "View product", Intent: "view", Href: "/agents/products?product=" + slow.ID}},
 			Entity:         &EntityRef{Type: "product", ID: slow.ID, Name: slow.Name},
 			DetectedAt:     detectedAt(now, id, 600), Confidence: 0.76,

@@ -87,7 +87,7 @@ type Insight struct {
 	Evidence       []Evidence `json:"evidence"`
 	LikelyCause    string     `json:"likelyCause,omitempty"`
 	Impact         string     `json:"impact,omitempty"`
-	ImpactValue    float64    `json:"impactValue"` // ₹ per month, signed (negative = loss)
+	ImpactValue    float64    `json:"impactValue"` // USD per month, signed (negative = loss)
 	Recommendation string     `json:"recommendation"`
 	Actions        []Action   `json:"actions"`
 	Entity         *EntityRef `json:"entity,omitempty"`
@@ -187,44 +187,33 @@ func detectedAt(now time.Time, id string, maxMinutes int) time.Time {
 	return now.Add(-time.Duration(4+hashN(id, maxMinutes)) * time.Minute)
 }
 
-// INR formats rupees in Indian short notation: ₹48.2L, ₹1.2Cr, ₹8.4K.
-func INR(v float64) string {
+// USD formats dollars in short notation: $48.2K, $1.24M, $1.06B.
+func USD(v float64) string {
 	sign := ""
 	if v < 0 {
 		sign = "-"
 		v = -v
 	}
 	switch {
-	case v >= 1e7:
-		return fmt.Sprintf("%s₹%.2fCr", sign, v/1e7)
-	case v >= 1e5:
-		return fmt.Sprintf("%s₹%.1fL", sign, v/1e5)
+	case v >= 1e9:
+		return fmt.Sprintf("%s$%.2fB", sign, v/1e9)
+	case v >= 1e6:
+		return fmt.Sprintf("%s$%.2fM", sign, v/1e6)
 	case v >= 1e3:
-		return fmt.Sprintf("%s₹%.1fK", sign, v/1e3)
+		return fmt.Sprintf("%s$%.1fK", sign, v/1e3)
+	case v >= 100 || v == math.Trunc(v):
+		return sign + "$" + Num(v)
 	default:
-		return fmt.Sprintf("%s₹%.0f", sign, v)
+		return fmt.Sprintf("%s$%.2f", sign, v)
 	}
 }
 
-func INRFull(v float64) string {
-	s := fmt.Sprintf("%.0f", math.Abs(v))
-	n := len(s)
-	if n > 3 {
-		head, tail := s[:n-3], s[n-3:]
-		var parts []string
-		for len(head) > 2 {
-			parts = append([]string{head[len(head)-2:]}, parts...)
-			head = head[:len(head)-2]
-		}
-		if head != "" {
-			parts = append([]string{head}, parts...)
-		}
-		s = strings.Join(parts, ",") + "," + tail
-	}
+// USDFull formats dollars with US thousands separators: $12,345.
+func USDFull(v float64) string {
 	if v < 0 {
-		return "-₹" + s
+		return "-$" + Num(-v)
 	}
-	return "₹" + s
+	return "$" + Num(v)
 }
 
 func Pct1(v float64) string { return fmt.Sprintf("%.1f%%", v) }

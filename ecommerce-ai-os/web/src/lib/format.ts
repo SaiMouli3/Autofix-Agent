@@ -1,33 +1,38 @@
-// Formatting helpers. All currency is INR, shown in Indian notation.
+// Formatting helpers. All currency is USD, shown in US notation.
 
 export type Unit = "currency" | "number" | "percent" | "hours" | "rating" | "ratio" | "days" | "score";
 
-const nf0 = new Intl.NumberFormat("en-IN", { maximumFractionDigits: 0 });
-const nf1 = new Intl.NumberFormat("en-IN", { maximumFractionDigits: 1 });
+const LOCALE = "en-US";
+const nf0 = new Intl.NumberFormat(LOCALE, { maximumFractionDigits: 0 });
+const nf1 = new Intl.NumberFormat(LOCALE, { maximumFractionDigits: 1 });
+const nf2 = new Intl.NumberFormat(LOCALE, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-export function inr(v: number, opts: { compact?: boolean } = {}): string {
+/** US dollars: compact ($48.2K, $1.24M, $1.06B) or full ($1,234 / $49.99). */
+export function usd(v: number, opts: { compact?: boolean } = {}): string {
   if (!Number.isFinite(v)) return "—";
   const compact = opts.compact ?? true;
   const sign = v < 0 ? "-" : "";
   const a = Math.abs(v);
   if (compact) {
-    if (a >= 1e7) return `${sign}₹${(a / 1e7).toFixed(2)}Cr`;
-    if (a >= 1e5) return `${sign}₹${(a / 1e5).toFixed(1)}L`;
-    if (a >= 1e3) return `${sign}₹${(a / 1e3).toFixed(1)}K`;
+    if (a >= 1e9) return `${sign}$${(a / 1e9).toFixed(2)}B`;
+    if (a >= 1e6) return `${sign}$${(a / 1e6).toFixed(2)}M`;
+    if (a >= 1e3) return `${sign}$${(a / 1e3).toFixed(1)}K`;
   }
-  return `${sign}₹${nf0.format(a)}`;
+  // Cents only where they carry meaning (prices, AOV, CPC).
+  const cents = a < 1000 && Math.round(a * 100) % 100 !== 0;
+  return `${sign}$${cents ? nf2.format(a) : nf0.format(a)}`;
 }
 
 export function num(v: number, digits = 0): string {
   if (!Number.isFinite(v)) return "—";
   if (digits === 0) return nf0.format(v);
-  return new Intl.NumberFormat("en-IN", { maximumFractionDigits: digits, minimumFractionDigits: digits }).format(v);
+  return new Intl.NumberFormat(LOCALE, { maximumFractionDigits: digits, minimumFractionDigits: digits }).format(v);
 }
 
 export function compactNum(v: number): string {
   const a = Math.abs(v);
-  if (a >= 1e7) return `${(v / 1e7).toFixed(1)}Cr`;
-  if (a >= 1e5) return `${(v / 1e5).toFixed(1)}L`;
+  if (a >= 1e9) return `${(v / 1e9).toFixed(1)}B`;
+  if (a >= 1e6) return `${(v / 1e6).toFixed(1)}M`;
   if (a >= 1e3) return `${(v / 1e3).toFixed(1)}K`;
   return nf1.format(v);
 }
@@ -40,7 +45,7 @@ export function pct(v: number, digits = 1): string {
 export function formatValue(v: number, unit: Unit | string, compact = true): string {
   switch (unit) {
     case "currency":
-      return inr(v, { compact });
+      return usd(v, { compact });
     case "percent":
       return pct(v, v >= 100 ? 0 : 1);
     case "hours":
@@ -85,17 +90,17 @@ export function relativeTime(iso: string | Date): string {
   if (h < 24) return `${h}h ago`;
   const d = Math.round(h / 24);
   if (d < 30) return `${d}d ago`;
-  return t.toLocaleDateString("en-IN", { day: "numeric", month: "short" });
+  return t.toLocaleDateString(LOCALE, { month: "short", day: "numeric" });
 }
 
 export function clockTime(iso: string | Date): string {
   const t = typeof iso === "string" ? new Date(iso) : iso;
-  return t.toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit", hour12: true });
+  return t.toLocaleTimeString(LOCALE, { hour: "numeric", minute: "2-digit", hour12: true });
 }
 
 export function shortDate(iso: string | Date, withYear = false): string {
   const t = typeof iso === "string" ? new Date(iso) : iso;
-  return t.toLocaleDateString("en-IN", { day: "numeric", month: "short", ...(withYear ? { year: "numeric" } : {}) });
+  return t.toLocaleDateString(LOCALE, { month: "short", day: "numeric", ...(withYear ? { year: "numeric" } : {}) });
 }
 
 /** Axis label for a bucket key ("2026-10-07" or "14:00"). */
@@ -103,8 +108,8 @@ export function bucketLabel(t: string, granularity?: string): string {
   if (/^\d{2}:\d{2}$/.test(t)) return t;
   const d = new Date(`${t}T00:00:00`);
   if (Number.isNaN(d.getTime())) return t;
-  if (granularity === "week") return d.toLocaleDateString("en-IN", { day: "numeric", month: "short" });
-  return d.toLocaleDateString("en-IN", { day: "numeric", month: "short" });
+  if (granularity === "week") return d.toLocaleDateString(LOCALE, { month: "short", day: "numeric" });
+  return d.toLocaleDateString(LOCALE, { month: "short", day: "numeric" });
 }
 
 export function greeting(d = new Date()): string {

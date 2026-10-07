@@ -41,7 +41,7 @@ func OrderRisk(o *model.Order, s *model.Shipment, now time.Time) string {
 		return "high"
 	}
 	if s != nil && IsDelayed(s, now) {
-		if o.Total >= 3000 {
+		if o.Total >= 100 {
 			return "high"
 		}
 		return "medium"
@@ -456,7 +456,7 @@ func ordersInsights(c *Ctx) []Insight {
 		monthlyShip := float64(v[0].shipments) / 12 * 30
 		rtoExtra := math.Max(0, analytics.Ratio(float64(v[0].rto), float64(v[0].shipments))-analytics.Ratio(float64(v[1].rto), float64(v[1].shipments)))
 		// RTO losses (forward + reverse shipping, handling) plus cancellation risk on delayed orders.
-		impact := -(monthlyShip*rtoExtra*(avgOrder*0.35+140) + float64(affected)/12*30*avgOrder*0.12)
+		impact := -(monthlyShip*rtoExtra*(avgOrder*0.35+4.7) + float64(affected)/12*30*avgOrder*0.12)
 		id := stableID("orders", "courier", worst.courier, worst.region)
 		rec := fmt.Sprintf("Temporarily route %s-region shipments away from %s", worst.region, worst.courier)
 		if bestAlt != "" {
@@ -474,7 +474,7 @@ func ordersInsights(c *Ctx) []Insight {
 				Ev("Related support tickets", Num(float64(clusterTickets))),
 			},
 			LikelyCause:    fmt.Sprintf("Hub congestion on %s's %s network — the drop is isolated to this courier and region; other couriers in the region are unaffected.", worst.courier, worst.region),
-			Impact:         fmt.Sprintf("%s/month in RTO losses and reshipping if unresolved", INR(-impact)),
+			Impact:         fmt.Sprintf("%s/month in RTO losses and reshipping if unresolved", USD(-impact)),
 			ImpactValue:    impact,
 			Recommendation: rec,
 			Actions: []Action{
@@ -534,8 +534,8 @@ func ordersInsights(c *Ctx) []Insight {
 			},
 			LikelyCause:    "Rising COD refusals at the doorstep, concentrated in regions with weaker courier performance.",
 			Impact:         fmt.Sprintf("≈%s extra RTOs per month at the current rate", Num(monthly)),
-			ImpactValue:    -monthly * 420,
-			Recommendation: "Add OTP/IVR confirmation for COD orders above ₹1,500 and offer a small prepaid incentive in high-RTO regions.",
+			ImpactValue:    -monthly * 14,
+			Recommendation: "Add OTP/IVR confirmation for COD orders above $50 and offer a small prepaid incentive in high-RTO regions.",
 			Actions: []Action{
 				{Label: "Investigate", Intent: "investigate", Href: "/agents/orders?tab=overview#rto"},
 				{Label: "View RTO orders", Intent: "view", Href: "/agents/orders?tab=data&status=rto"},
@@ -553,7 +553,7 @@ func ordersInsights(c *Ctx) []Insight {
 		if s == nil || s.DeliveredAt != nil || o.Status == model.OrderRTO || o.Status == model.OrderCancelled {
 			continue
 		}
-		if now.After(s.PromisedAt) && o.Total >= 2500 {
+		if now.After(s.PromisedAt) && o.Total >= 85 {
 			hv = append(hv, o)
 			hvValue += o.Total
 		}
@@ -569,14 +569,14 @@ func ordersInsights(c *Ctx) []Insight {
 		out = append(out, Insight{
 			ID: id, AgentID: "orders", Severity: SevImportant,
 			Title:   fmt.Sprintf("%d high-value orders are delayed", len(hv)),
-			Summary: fmt.Sprintf("%d orders worth %s have passed their promised delivery date and are still undelivered; %d %s stuck in NDR.", len(hv), INR(hvValue), ndrN, map[bool]string{true: "is", false: "are"}[ndrN == 1]),
+			Summary: fmt.Sprintf("%d orders worth %s have passed their promised delivery date and are still undelivered; %d %s stuck in NDR.", len(hv), USD(hvValue), ndrN, map[bool]string{true: "is", false: "are"}[ndrN == 1]),
 			Evidence: []Evidence{
 				Ev("Orders past SLA", Num(float64(len(hv)))),
-				Ev("Order value at risk", INR(hvValue)),
+				Ev("Order value at risk", USD(hvValue)),
 				Ev("Stuck in NDR", Num(float64(ndrN))),
 			},
 			LikelyCause:    "Courier delays and failed delivery attempts.",
-			Impact:         fmt.Sprintf("%s in order value at risk of cancellation or RTO", INR(hvValue)),
+			Impact:         fmt.Sprintf("%s in order value at risk of cancellation or RTO", USD(hvValue)),
 			ImpactValue:    -hvValue * 0.3,
 			Recommendation: "Escalate these shipments with the courier and send a proactive delay message with a revised ETA.",
 			Actions: []Action{

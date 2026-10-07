@@ -91,7 +91,7 @@ func (s *Service) Dataset(ctx context.Context, st model.Store) (*model.Dataset, 
 // CreateDemoStore generates and persists a seeded demo store for an org.
 func (s *Service) CreateDemoStore(ctx context.Context, orgID, businessType, name string) (*model.Store, error) {
 	now := time.Now()
-	st := model.Store{ID: repo.NewID("st"), OrgID: orgID, Name: name, Platform: "demo", BusinessType: businessType, Currency: "INR", SeededAt: now, CreatedAt: now}
+	st := model.Store{ID: repo.NewID("st"), OrgID: orgID, Name: name, Platform: "demo", BusinessType: businessType, Currency: "USD", SeededAt: now, CreatedAt: now}
 	ds := seed.Generate(st, now)
 	st.Name = ds.Store.Name
 	ds.Store = st

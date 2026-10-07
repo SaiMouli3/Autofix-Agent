@@ -26,7 +26,7 @@ export function AgentSettingsForm({ agent, settings }: { agent: AgentSummary; se
           <CardBody className="flex flex-wrap items-center justify-between gap-3">
             <div className="text-[13px]">
               <div className="font-medium">{s.paused ? "Agent is paused" : "Agent is monitoring continuously"}</div>
-              <div className="text-fg-3">Last analysis ran over {agent.recordsAnalyzed.toLocaleString("en-IN")} records.</div>
+              <div className="text-fg-3">Last analysis ran over {agent.recordsAnalyzed.toLocaleString("en-US")} records.</div>
             </div>
             <Button variant={s.paused ? "primary" : "secondary"} disabled={save.isPending}
               onClick={() => { const n = { ...s, paused: !s.paused }; setS(n); submit(n, n.paused ? `${agent.shortName} agent paused` : `${agent.shortName} agent resumed`); }}>

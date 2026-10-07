@@ -9,7 +9,7 @@ import { useTheme } from "next-themes";
 import { useQuery } from "@tanstack/react-query";
 import { api, qs } from "@/lib/api";
 import { AGENTS } from "@/lib/agents";
-import { inr } from "@/lib/format";
+import { usd } from "@/lib/format";
 import { useAppStore } from "@/lib/store";
 import { Kbd } from "@/components/ui/misc";
 
@@ -93,7 +93,7 @@ export function CommandPalette() {
                   {data.orders.map((o) => (
                     <Command.Item key={o.id} value={`order ${o.number} ${o.customer} ${q}`} className={item} onSelect={() => go(`/agents/orders?tab=data&q=${encodeURIComponent(o.number)}`)}>
                       <Receipt /> <span className="text-fg">{o.number}</span> <span className="truncate">{o.customer}</span>
-                      <span className="ml-auto tabular text-[12px] text-fg-3">{inr(o.amount)}</span>
+                      <span className="ml-auto tabular text-[12px] text-fg-3">{usd(o.amount)}</span>
                     </Command.Item>
                   ))}
                 </Command.Group>

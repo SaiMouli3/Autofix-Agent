@@ -93,7 +93,7 @@ Next.js (web)  ──/api proxy──▶  Go Fiber API
   (e.g. two-proportion z-tests for return and on-time rates).
 * **Agents are independent; the Business Insights agent is not a duplicate.** It only reasons over other
   agents' findings — e.g. Product (return spike) + Reviews (negative surge) + Support (complaint cluster)
-  → *"Potential product-quality issue"* with an evidence chain and ₹ impact.
+  → *"Potential product-quality issue"* with an evidence chain and $ impact.
 * **Realistic demo data with real relationships.** ~17k orders, ~10k customers, 100 products, ~1.2k reviews,
   ~900 support tickets, 180 days of inventory, campaigns, competitor prices, finance and news. Returns
   reference delivered orders, reviews reference real customers/products, inventory is reconstructed from unit

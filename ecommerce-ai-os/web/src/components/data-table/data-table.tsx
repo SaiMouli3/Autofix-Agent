@@ -215,7 +215,7 @@ export function DataTable({ endpoint, columns, filters = [], defaultSort, defaul
       {data && data.total > 0 && (
         <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border px-4 py-2.5 text-[12px] text-fg-3">
           <span className="tabular">
-            Showing {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, data.total)} of {data.total.toLocaleString("en-IN")}
+            Showing {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, data.total)} of {data.total.toLocaleString("en-US")}
           </span>
           <div className="flex items-center gap-2">
             <Select value={pageSize} onChange={(e) => { setPageSize(Number(e.target.value)); setPage(1); }} aria-label="Rows per page" className="h-7">
