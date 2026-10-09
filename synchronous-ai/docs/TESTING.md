@@ -5,7 +5,7 @@
 | Unit | `pytest tests/test_unit.py` | nothing |
 | Offline integration (real server, real OpenHands runtime, DB, workers) | `pytest -m "not live and not docker"` | nothing (set `SCA_DATABASE_URL` to run on PostgreSQL) |
 | Live (real runtime + real model provider) | `EXP_LABS_API_KEY=… pytest -m live` | provider key, internet |
-| Browser E2E (Playwright, fresh instance) | `EXP_LABS_API_KEY=… scripts/e2e.sh platform.spec` | provider key, Chromium |
+| Browser E2E (Playwright, fresh instance) | `EXP_LABS_API_KEY=… scripts/e2e.sh platform.spec salesforce-oauth` | provider key, Chromium |
 | **Mocked** UI states (Playwright, no backend) | `cd frontend && npm run test:ui` | Chromium |
 
 Mock providers are used in exactly one place: `tests/test_api.py` starts a tiny OpenAI-compatible
@@ -17,6 +17,11 @@ built bundle and answers `/api` with fixtures copied from real responses, to exe
 cannot be produced on demand (empty data, HTTP 500 + retry, 401 redirect, viewer role, 403 state,
 approval confirmation incl. CSRF header, dialog focus trap, Ctrl+K, mobile drawer). It never
 claims anything about backend behaviour.
+
+The third is the OAuth vendor test double used by `backend/tests/test_oauth.py` and
+`frontend/e2e/salesforce-oauth.spec.ts`. It is a local server shaped like Salesforce's OAuth/REST
+and SAP Gateway's CSRF endpoints, because real vendors cannot be made to expire, rotate or revoke
+tokens on demand. The platform side of those tests (UI, API, storage, gateway) is real.
 
 ## Coverage map
 
@@ -57,17 +62,20 @@ absent from the JS/CSS bundle, API responses and the server log.
 
 | Suite | Result |
 |---|---|
-| Unit + offline integration, SQLite | **51 passed** (31.7 s) |
+| Unit + offline integration, SQLite | **54 passed** (34.7 s), incl. OAuth sign-in/refresh/rotation/revocation and SAP CSRF against a local vendor test double |
 | Connector *Test connection* against live Shopify, Meta Graph and Meta Ads MCP endpoints (invalid token) | all 4 reached the vendor and reported HTTP 401 as failed |
-| Browser E2E through the redesigned UI, Experiential Labs | **1 passed** (24.7 s) |
+| Browser E2E through the redesigned UI, Experiential Labs | **1 passed** (25.1 s) |
+| Browser E2E: Salesforce one-click OAuth (real platform, vendor test double) | **1 passed** (2.4 s; also standalone on a fresh instance) |
+| Live: Salesforce authorize + token endpoints, SAP sandbox (placeholder credentials) | reached the vendors; rejected as `invalid_client_id` / HTTP 401 |
 | Mocked UI-state tests | **9 passed** (9.7 s) |
 | `ruff` (CI error classes) | clean |
 | `npm audit --omit=dev --audit-level=high` | passes; 2 moderate in react-router (fix only in v7, see SECURITY.md) |
 | Frontend typecheck + production build | clean |
 | Provider key in `dist/` or tracked files | not found |
 
-Not re-run for this commit (backend runtime code unchanged since): PostgreSQL suite (last: 44 passed
-before the 4 new API tests were added) and the live pytest suite (last: 8 passed).
+| Unit + offline integration, PostgreSQL 16 | **54 passed** (39.3 s) |
+
+Not re-run for this commit: the live pytest suite (last: 8 passed; agent runtime code unchanged since).
 
 Manually verified (not automated in CI because it needs Docker-in-Docker and the 4.6 GB sandbox
 image): a task on the **docker runtime** ran inside a resource-limited OpenHands agent-server

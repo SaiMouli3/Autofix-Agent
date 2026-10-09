@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Blocks, CheckCircle2, ExternalLink, FileJson, KeyRound, Plug, Plus, Power, ShieldCheck, Trash2, Wand2, X, XCircle } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { Shell } from "../components/Shell";
 import { Alert, Dialog, Empty, ErrorState, InlineError, KV, SearchField, SkeletonRows, Status, Tabs, Tag, useConfirm, useToast } from "../components/ui";
@@ -21,7 +21,7 @@ const CATEGORIES: { key: string; label: string }[] = [
   { key: "other", label: "Other" },
 ];
 const CAT_LABEL = Object.fromEntries(CATEGORIES.map((c) => [c.key, c.label]));
-const AUTH_LABEL: Record<string, string> = { none: "None", bearer: "Bearer token", api_key_header: "API key (header)", api_key_query: "API key (query)", basic: "Basic auth" };
+const AUTH_LABEL: Record<string, string> = { none: "None", bearer: "Bearer token", api_key_header: "API key (header)", api_key_query: "API key (query)", basic: "Basic auth", oauth2: "OAuth 2.0 sign-in (PKCE)" };
 
 export default function Integrations() {
   const { can } = useSession();
@@ -35,7 +35,7 @@ export default function Integrations() {
   const providers = useQuery({ queryKey: ["providers"], queryFn: ({ signal }) => api.get("/api/providers", signal), refetchInterval: 30000 });
   const rows = useMemo(() => {
     const ints = (integrations.data ?? []).map((i: any) => ({ kind: "integration", id: i.id, name: i.name, desc: i.description, cat: i.type === "mcp" ? "mcp" : i.category, state: integrationState(i),
-      auth: i.type === "mcp" ? (i.has_credential ? `${i.config.auth_header} header` : "None") : AUTH_LABEL[i.config?.auth?.type ?? "none"],
+      auth: i.oauth ? (i.oauth.connected ? "OAuth · connected" : "OAuth · not connected") : i.type === "mcp" ? (i.has_credential ? `${i.config.auth_header} header` : "None") : AUTH_LABEL[i.config?.auth?.type ?? "none"],
       agents: i.permitted_agents.length, ops: i.type === "http" ? (i.config.operations ?? []).filter((o: any) => o.enabled).length : i.health?.tools?.length ?? null,
       last: i.last_success_at, error: i.health?.ok === false ? i.health.detail : null, raw: i }));
     const provs = (providers.data ?? []).map((p: any) => ({ kind: "provider", id: p.id, name: p.name, desc: `${p.kind_label} · ${p.base_url}`, cat: "providers", state: providerState(p),
@@ -46,6 +46,17 @@ export default function Integrations() {
   const counts = (k: string) => (k ? rows.filter((r) => r.cat === k).length : rows.length);
   const visible = rows.filter((r) => (!cat || r.cat === cat) && (!q || `${r.name} ${r.desc}`.toLowerCase().includes(q.toLowerCase())));
   const current = rows.find((r) => r.id === sel);
+  const toast = useToast();
+  const qc = useQueryClient();
+  const oauthError = sp.get("oauth_error");
+  useEffect(() => {
+    // Returning from a vendor sign-in (/api/oauth/callback redirects here).
+    if (sp.get("oauth") === "connected") {
+      toast("ok", "Connected. The platform now holds an encrypted, auto-refreshing token. Run a connection test, then activate.");
+      qc.invalidateQueries({ queryKey: ["integrations"] });
+      const n = new URLSearchParams(sp); n.delete("oauth"); setSp(n, { replace: true });
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const open = (id: string) => { const n = new URLSearchParams(sp); n.set("id", id); setSp(n, { replace: true }); };
   const close = () => { const n = new URLSearchParams(sp); n.delete("id"); setSp(n, { replace: true }); };
 
@@ -61,6 +72,11 @@ export default function Integrations() {
           </div>
         )}
       </div>
+      {oauthError && (
+        <div style={{ marginBottom: 12 }}><Alert kind="error" actions={<button className="btn sm" onClick={() => { const n = new URLSearchParams(sp); n.delete("oauth_error"); setSp(n, { replace: true }); }}>Dismiss</button>}>
+          <b>Sign-in was not completed.</b> {oauthError}
+        </Alert></div>
+      )}
       <div className="filters" role="group" aria-label="Category">
         {CATEGORIES.map((c) => (
           <button key={c.key} className="chip-btn" aria-pressed={cat === c.key} onClick={() => { const n = new URLSearchParams(sp); c.key ? n.set("cat", c.key) : n.delete("cat"); setSp(n, { replace: true }); }}>
@@ -168,7 +184,7 @@ function IntegrationDetail({ id, onClose }: { id: string; onClose: () => void })
   const ops = i.config.operations ?? [];
   const write = can("integrations:write");
   const failing = (i.validation ?? []).filter((c: any) => !c.ok);
-  const needsCred = i.type === "http" ? (i.config.auth?.type ?? "none") !== "none" : false;
+  const needsCred = i.oauth ? true : i.type === "http" ? (i.config.auth?.type ?? "none") !== "none" : false;
   return (
     <aside className="panel" aria-label={`${i.name} details`}>
       <div className="panel-head">
@@ -189,12 +205,12 @@ function IntegrationDetail({ id, onClose }: { id: string; onClose: () => void })
             </div>
           )}
         </div>
-        {state === "misconfigured" && <Alert kind="warn">{needsCred && !i.has_credential ? "A credential is required before this integration can connect." : "The configuration has validation errors (see Checks)."}</Alert>}
+        {state === "misconfigured" && <Alert kind="warn">{i.oauth && !i.oauth.connected ? "Sign in with the provider (Connect below) before this integration can be used." : needsCred && !i.has_credential ? "A credential is required before this integration can connect." : "The configuration has validation errors (see Checks)."}</Alert>}
         {i.health?.checked_at && !i.health.ok && <Alert kind="error">Last check {timeAgo(i.health.checked_at)}: {i.health.detail}</Alert>}
         <KV items={[
           ["Endpoint", <span key="e" className="mono">{i.type === "http" ? i.config.base_url : i.config.url || i.config.command}</span>],
-          ["Authentication", i.type === "http" ? AUTH_LABEL[i.config.auth?.type ?? "none"] : i.has_credential ? `${i.config.auth_header} header` : "None"],
-          ["Credential", i.has_credential ? <span key="c">Stored encrypted · <span className="mono">{i.credential_fingerprint}</span></span> : needsCred ? <span key="c" style={{ color: "var(--warning)" }}>Missing</span> : "Not required"],
+          ["Authentication", i.oauth ? AUTH_LABEL.oauth2 : i.type === "http" ? AUTH_LABEL[i.config.auth?.type ?? "none"] : i.has_credential ? `${i.config.auth_header} header` : "None"],
+          ...(i.oauth ? [] : [["Credential", i.has_credential ? <span key="c">Stored encrypted · <span className="mono">{i.credential_fingerprint}</span></span> : needsCred ? <span key="c" style={{ color: "var(--warning)" }}>Missing</span> : "Not required"] as [string, any]]),
           ["Category", write && i.type === "http" ? (
             <select key="cat" value={i.category} onChange={(e) => (setCat.mutate as any)(e.target.value)} style={{ height: 26, fontSize: 12.5 }} aria-label="Category">
               {CATEGORIES.filter((c) => !["", "providers", "mcp"].includes(c.key)).map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
@@ -203,7 +219,8 @@ function IntegrationDetail({ id, onClose }: { id: string; onClose: () => void })
           ["Last success", i.last_success_at ? fullDateTime(i.last_success_at) : "Never"],
           ["Approved by", i.approved_by ? "an administrator" : "Not yet approved"],
         ]} />
-        {write && (
+        {i.oauth && <OAuthPanel i={i} write={write} onChanged={refresh} />}
+        {write && !i.oauth && (
           <form className="row" onSubmit={(e) => { e.preventDefault(); if (cred) { saveCred.mutate(); setCred(""); } }}>
             <label className="sr-only" htmlFor="cred">{i.has_credential ? "Rotate credential" : "Credential"}</label>
             <input id="cred" type="password" autoComplete="off" placeholder={i.has_credential ? "Rotate credential" : "Paste credential"} value={cred} onChange={(e) => setCred(e.target.value)} />
@@ -413,6 +430,7 @@ function ConnectorGallery({ onClose, onCreated }: { onClose: () => void; onCreat
   const [pick, setPick] = useState<any>(null);
   const [values, setValues] = useState<Record<string, string>>({});
   const [credential, setCredential] = useState("");
+  const [client, setClient] = useState({ client_id: "", client_secret: "" });
   const [touched, setTouched] = useState(false);
   const errors: Record<string, string> = {};
   for (const p of pick?.params ?? []) {
@@ -423,14 +441,15 @@ function ConnectorGallery({ onClose, onCreated }: { onClose: () => void; onCreat
     mutationFn: () => api.post(`/api/integrations/connectors/${pick.key}`, {
       params: Object.fromEntries((pick.params ?? []).map((p: any) => [p.key, (values[p.key] ?? p.default ?? "").trim()])),
       credential: credential || null,
+      oauth_client: pick.auth === "oauth2" && client.client_id.trim() ? { client_id: client.client_id.trim(), client_secret: client.client_secret.trim() || null } : null,
     }),
     onSuccess: (i) => {
       qc.invalidateQueries({ queryKey: ["integrations"] });
-      toast("ok", `${i.name} added as proposed. Run a connection test, review its operations, then activate it.`);
+      toast("ok", i.oauth ? `${i.name} added. Next: Connect (sign in with ${pick.vendor}), test, then activate.` : `${i.name} added as proposed. Run a connection test, review its operations, then activate it.`);
       onCreated(i.id);
     },
   });
-  const choose = (c: any) => { setPick(c); setValues({}); setCredential(""); setTouched(false); create.reset(); };
+  const choose = (c: any) => { setPick(c); setValues({}); setCredential(""); setClient({ client_id: "", client_secret: "" }); setTouched(false); create.reset(); };
   if (!pick) {
     return (
       <Dialog size="wide" title="Connectors" description="Prebuilt definitions for common business systems. Each one is added as a proposed integration: nothing is connected until a live test passes and an administrator activates it." onClose={onClose}>
@@ -441,7 +460,8 @@ function ConnectorGallery({ onClose, onCreated }: { onClose: () => void; onCreat
             <button key={c.key} type="button" className="choice" disabled={!c.available} onClick={() => choose(c)} style={{ flexDirection: "column", alignItems: "stretch", gap: 4, textAlign: "left" }}>
               <span className="row between"><b className="small">{c.name}</b><span className="row" style={{ gap: 4 }}><Tag tone="outline">{c.vendor}</Tag><Tag>{c.type === "mcp" ? "MCP server" : "HTTP API"}</Tag></span></span>
               <span className="small muted">{c.summary}</span>
-              {c.operations && <span className="tiny muted">{c.operations.filter((o: any) => o.read_only).length} read · {c.operations.filter((o: any) => !o.read_only).length} change (approval required)</span>}
+              {c.operations && <span className="tiny muted">{c.operations.filter((o: any) => o.read_only).length} read · {c.operations.filter((o: any) => !o.read_only).length} change (approval required){c.auth === "oauth2" ? " · one-click sign-in" : ""}</span>}
+              {!c.operations && c.auth === "oauth2" && <span className="tiny muted">One-click sign-in</span>}
               {!c.available && <span className="tiny" style={{ color: "var(--warning)" }}>{c.unavailable_reason}</span>}
             </button>
           ))}
@@ -463,6 +483,17 @@ function ConnectorGallery({ onClose, onCreated }: { onClose: () => void; onCreat
                 {touched && errors[p.key] ? <span className="err">{errors[p.key]}</span> : p.help && <span className="help">{p.help}</span>}
               </label>
             ))}
+          </div>
+        )}
+        {pick.auth === "oauth2" && pick.oauth_client && (
+          <div className="stack tight">
+            <div className="section-title">Sign-in with {pick.vendor} (OAuth 2.0 + PKCE)</div>
+            <p className="small muted" style={{ margin: 0 }}>{pick.oauth_client.help}</p>
+            <KV items={[["Callback URL", <CopyText key="cb" value={pick.oauth_redirect_uri} />], ["OAuth scopes", <span key="sc" className="mono small">{pick.oauth_client.scopes}</span>]]} />
+            <div className="form-grid">
+              <label className="field">Consumer key (client ID)<input value={client.client_id} onChange={(e) => setClient({ ...client, client_id: e.target.value })} autoComplete="off" /></label>
+              <label className="field">Consumer secret<input type="password" value={client.client_secret} onChange={(e) => setClient({ ...client, client_secret: e.target.value })} autoComplete="off" /><span className="help">Stored encrypted. You can also add these later.</span></label>
+            </div>
           </div>
         )}
         {pick.credential && (
@@ -492,5 +523,68 @@ function ConnectorGallery({ onClose, onCreated }: { onClose: () => void; onCreat
         <InlineError error={create.error} />
       </div>
     </Dialog>
+  );
+}
+
+function CopyText({ value }: { value: string }) {
+  const toast = useToast();
+  return (
+    <span className="row" style={{ gap: 6, minWidth: 0 }}>
+      <span className="mono small ellipsis" title={value}>{value}</span>
+      <button type="button" className="btn xs ghost" onClick={() => navigator.clipboard.writeText(value).then(() => toast("ok", "Copied"), () => toast("error", "Copy failed; select the text instead"))}>Copy</button>
+    </span>
+  );
+}
+
+/** OAuth connection state and actions. Tokens never reach the browser: Connect sends the user to
+ *  the vendor, whose redirect lands on the backend callback, which stores the tokens encrypted. */
+function OAuthPanel({ i, write, onChanged }: { i: any; write: boolean; onChanged: () => void }) {
+  const toast = useToast();
+  const confirm = useConfirm();
+  const o = i.oauth;
+  const [editing, setEditing] = useState(!o.client_configured);
+  const [client, setClient] = useState({ client_id: "", client_secret: "" });
+  const saveClient = useMutation({ mutationFn: () => api.put(`/api/integrations/${i.id}/oauth/client`, { client_id: client.client_id.trim(), client_secret: client.client_secret.trim() || null }),
+    onSuccess: () => { setEditing(false); setClient({ client_id: "", client_secret: "" }); onChanged(); toast("ok", "Client credentials stored encrypted"); }, onError: (e: any) => toast("error", e.message) });
+  const start = useMutation({ mutationFn: () => api.post(`/api/integrations/${i.id}/oauth/start`), onSuccess: (r) => window.location.assign(r.authorize_url), onError: (e: any) => toast("error", e.message) });
+  const disconnect = useMutation({ mutationFn: () => api.post(`/api/integrations/${i.id}/oauth/disconnect`), onSuccess: (r) => { onChanged(); toast("ok", r.vendor_revoked ? "Disconnected and the provider revoked the token" : "Disconnected. The provider did not confirm revocation; revoke the app's access there if needed."); }, onError: (e: any) => toast("error", e.message) });
+  return (
+    <section className="panel" style={{ padding: 12, background: "var(--surface-2)" }} aria-label="Sign-in">
+      <div className="row between wrap">
+        <div className="row" style={{ gap: 8 }}>
+          {o.connected && !o.needs_reauthorization ? <Status status="connected" label="Signed in" /> : o.needs_reauthorization ? <Status status="error" label="Sign-in expired" /> : <Status status="disconnected" label="Not signed in" />}
+        </div>
+        {write && (
+          <div className="row">
+            {o.connected && <button className="btn sm ghost" disabled={disconnect.isPending} onClick={async () => { if (await confirm({ title: `Disconnect ${i.name}?`, body: "The stored tokens are revoked (when the provider supports it) and deleted. Agents lose access until someone connects again. Client credentials are kept.", confirmLabel: "Disconnect", danger: true })) disconnect.mutate(); }}>Disconnect</button>}
+            <button className="btn sm dark" disabled={!o.client_configured || start.isPending} onClick={() => start.mutate()} title={!o.client_configured ? "Add the client credentials first" : undefined}>
+              {start.isPending ? "Redirecting…" : o.connected ? "Reconnect" : `Connect ${i.name}`}
+            </button>
+          </div>
+        )}
+      </div>
+      <div className="mt8">
+        <KV items={[
+          ["Callback URL", <CopyText key="cb" value={o.redirect_uri} />],
+          ["Client", o.client_configured ? <span key="c" className="mono small">{o.client_id_hint} {write && <button className="disclose" onClick={() => setEditing(!editing)}>Change</button>}</span> : <span key="c" style={{ color: "var(--warning)" }}>Not set</span>],
+          ...(o.connected ? [
+            ["Authorized", o.authorized_at ? fullDateTime(o.authorized_at) : "—"],
+            ["Scopes", <span key="s" className="mono small">{o.scope || "as configured"}</span>],
+            ...(o.instance_url ? [["Account host", <span key="h" className="mono small">{o.instance_url}</span>]] : []),
+            ["Token", o.expires_at ? `expires ${fullDateTime(o.expires_at)} · refreshed automatically` : o.has_refresh_token ? "refreshed automatically when rejected" : "no refresh token: reconnect when it expires"],
+          ] as [string, any][] : []),
+        ]} />
+      </div>
+      {write && editing && (
+        <form className="stack tight mt8" onSubmit={(e) => { e.preventDefault(); if (client.client_id.trim()) saveClient.mutate(); }}>
+          <div className="form-grid">
+            <label className="field">Consumer key (client ID)<input value={client.client_id} onChange={(e) => setClient({ ...client, client_id: e.target.value })} autoComplete="off" /></label>
+            <label className="field">Consumer secret<input type="password" value={client.client_secret} onChange={(e) => setClient({ ...client, client_secret: e.target.value })} autoComplete="off" /></label>
+          </div>
+          {o.connected && <span className="tiny" style={{ color: "var(--warning)" }}>Changing the client disconnects the current sign-in.</span>}
+          <div><button className="btn sm" disabled={!client.client_id.trim() || saveClient.isPending}><KeyRound /> Save client</button></div>
+        </form>
+      )}
+    </section>
   );
 }

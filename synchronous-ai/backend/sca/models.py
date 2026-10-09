@@ -400,6 +400,22 @@ class Integration(Base):
     updated_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow, onupdate=utcnow)
 
 
+class OAuthState(Base):
+    """A pending OAuth authorization. ``id`` is the SHA-256 of the state value sent to the vendor,
+    so the raw state never sits in the database; the PKCE verifier is stored encrypted."""
+
+    __tablename__ = "oauth_states"
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    org_id: Mapped[str] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), index=True)
+    integration_id: Mapped[str] = mapped_column(ForeignKey("integrations.id", ondelete="CASCADE"), index=True)
+    user_id: Mapped[str] = mapped_column(String(32))
+    verifier: Mapped[bytes] = mapped_column(LargeBinary)
+    redirect_uri: Mapped[str] = mapped_column(String(500))
+    created_at: Mapped[datetime] = _created()
+    expires_at: Mapped[datetime] = mapped_column(UTCDateTime)
+    used_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
+
+
 # ---------------------------------------------------------------------------
 # Knowledge
 # ---------------------------------------------------------------------------

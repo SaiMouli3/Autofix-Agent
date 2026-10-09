@@ -131,6 +131,7 @@ def create_app() -> FastAPI:
 
     for r in (auth, agents, tasks, approvals, providers, integrations, knowledge, schedules, admin, dashboard):
         app.include_router(r.router)
+    app.include_router(integrations.oauth_router)
 
     app.mount("/mcp/platform", mcp_app)
 

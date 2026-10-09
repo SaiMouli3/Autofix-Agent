@@ -256,6 +256,229 @@ CONNECTORS: list[dict[str, Any]] = [
     },
 ]
 
+# --------------------------------------------------------------------------- Salesforce
+
+_SF_LOGIN_HOST = {"key": "login_host", "label": "Login host", "default": "login.salesforce.com",
+                  "pattern": r"^[a-z0-9-]+(\.[a-z0-9-]+)*\.(salesforce|force)\.com$",
+                  "help": "login.salesforce.com for production, test.salesforce.com for sandboxes, or your My Domain "
+                          "(e.g. acme.my.salesforce.com).", "normalize": "host"}
+_SF_OAUTH_CLIENT = {
+    "label": "External Client App",
+    "help": "In Salesforce Setup → External Client App Manager, create an app with OAuth enabled, add the callback URL "
+            "shown here, select the scopes listed below, and require PKCE (Salesforce now requires PKCE and refresh "
+            "token rotation for External Client Apps). Paste its Consumer Key and Consumer Secret. A new app can take "
+            "up to 30 minutes to become usable.",
+}
+_SF_PATH = {"type": "string", "pattern": r"^[A-Za-z0-9_]{1,80}$"}
+_SF_ID = {"type": "string", "pattern": r"^[A-Za-z0-9]{15}([A-Za-z0-9]{3})?$", "description": "15- or 18-character record ID"}
+
+
+def _salesforce_oauth(scopes: list[str]) -> dict[str, Any]:
+    return {"authorize_url": "https://{{login_host}}/services/oauth2/authorize",
+            "token_url": "https://{{login_host}}/services/oauth2/token",
+            "revoke_url": "https://{{login_host}}/services/oauth2/revoke",
+            "scopes": scopes, "pkce": True}
+
+
+CONNECTORS += [
+    {
+        "key": "salesforce",
+        "name": "Salesforce",
+        "vendor": "Salesforce",
+        "type": "http",
+        "category": "business_api",
+        "auth": "oauth2",
+        "summary": "Accounts, contacts, leads, opportunities, cases and any custom object through the Salesforce REST "
+                   "API: SOQL queries, search, record reads, and approval-gated create, update and delete.",
+        "docs_url": "https://developer.salesforce.com/docs/atlas.en-us.api_rest.meta/api_rest/",
+        "params": [
+            _SF_LOGIN_HOST,
+            {"key": "api_version", "label": "API version", "default": "v67.0", "pattern": r"^v\d{2}\.0$",
+             "help": "v67.0 is Summer '26; Winter '27 (v68.0) was still in preview on 2026-10-09."},
+        ],
+        "credential": None,
+        "oauth_client": {**_SF_OAUTH_CLIENT, "scopes": "api, refresh_token (offline_access)"},
+        "config": {
+            "base_url": "https://{{login_host}}/services/data/{{api_version}}",
+            "auth": {"type": "oauth2"},
+            "oauth": {**_salesforce_oauth(["api", "refresh_token"]), "base_url_from_token": "instance_url"},
+            "default_headers": {"Accept": "application/json"},
+            "health_check_path": "/limits",
+            "rate_limit_per_min": 120,
+            "timeout_s": 60,
+            "operations": [
+                {"name": "soql_query", "description": "Run a SOQL query (always read-only), e.g. SELECT Id, Name, Amount, "
+                                                      "StageName FROM Opportunity WHERE IsClosed = false ORDER BY Amount DESC "
+                                                      "LIMIT 20. If done is false, pass nextRecordsUrl's last segment to query_next_page.",
+                 "method": "GET", "path": "/query", "params_schema": _props(["q"], q={"type": "string", "description": "SOQL query"})},
+                {"name": "query_next_page", "description": "Next page of a SOQL result (the locator after /query/ in nextRecordsUrl).",
+                 "method": "GET", "path": "/query/{locator}",
+                 "params_schema": _props(["locator"], locator={"type": "string", "pattern": r"^[A-Za-z0-9-]{10,40}$"})},
+                {"name": "sosl_search", "description": "Full-text search across objects with SOSL, e.g. FIND {Acme} IN NAME "
+                                                       "FIELDS RETURNING Account(Id, Name), Contact(Id, Name, Email).",
+                 "method": "GET", "path": "/search", "params_schema": _props(["q"], q={"type": "string"})},
+                {"name": "list_objects", "description": "All objects available to the connected user (standard and custom).",
+                 "method": "GET", "path": "/sobjects"},
+                {"name": "describe_object", "description": "Fields, types, picklist values and relationships of an object.",
+                 "method": "GET", "path": "/sobjects/{sobject}/describe", "params_schema": _props(["sobject"], sobject=_SF_PATH)},
+                {"name": "get_record", "description": "One record by ID; pass fields (comma-separated) to limit the response.",
+                 "method": "GET", "path": "/sobjects/{sobject}/{record_id}",
+                 "params_schema": _props(["sobject", "record_id"], sobject=_SF_PATH, record_id=_SF_ID, fields=_STR)},
+                {"name": "get_limits", "description": "Org API limits and current usage.", "method": "GET", "path": "/limits"},
+                {"name": "create_record", "description": "Create a record; body holds field values, e.g. {\"Name\": \"Acme\"}. "
+                                                         "Waits for human approval.",
+                 "method": "POST", "path": "/sobjects/{sobject}", "requires_approval": True, "enabled": False,
+                 "params_schema": _props(["sobject", "body"], sobject=_SF_PATH, body=_OBJ)},
+                {"name": "update_record", "description": "Update fields of a record (PATCH). Waits for human approval.",
+                 "method": "PATCH", "path": "/sobjects/{sobject}/{record_id}", "requires_approval": True, "enabled": False,
+                 "params_schema": _props(["sobject", "record_id", "body"], sobject=_SF_PATH, record_id=_SF_ID, body=_OBJ)},
+                {"name": "delete_record", "description": "Delete a record (moves it to the Recycle Bin). Waits for human approval.",
+                 "method": "DELETE", "path": "/sobjects/{sobject}/{record_id}", "enabled": False,
+                 "params_schema": _props(["sobject", "record_id"], sobject=_SF_PATH, record_id=_SF_ID)},
+            ],
+        },
+    },
+    {
+        "key": "salesforce_mcp",
+        "name": "Salesforce Hosted MCP",
+        "vendor": "Salesforce",
+        "type": "mcp",
+        "category": "business_api",
+        "auth": "oauth2",
+        "summary": "Salesforce's hosted MCP servers (generally available since April 2026): record tools that respect the "
+                   "connected user's permissions, plus flows, invocable actions and more, depending on the server.",
+        "docs_url": "https://developer.salesforce.com/docs/platform/hosted-mcp-servers/guide",
+        "params": [
+            _SF_LOGIN_HOST,
+            {"key": "environment", "label": "Environment", "default": "platform", "pattern": r"^(platform|sandbox)$",
+             "help": "platform for production orgs, sandbox for sandbox and scratch orgs."},
+            {"key": "server", "label": "Server", "default": "sobject-reads", "pattern": r"^[a-z0-9][a-z0-9-]{1,60}$",
+             "help": "Enable it first in Setup → API Catalog → MCP Servers, e.g. sobject-reads, sobject-all, flows."},
+        ],
+        "credential": None,
+        "oauth_client": {**_SF_OAUTH_CLIENT, "scopes": "mcp_api, refresh_token (offline_access) — not api",
+                         "help": _SF_OAUTH_CLIENT["help"] + " For hosted MCP, also select 'Issue JSON Web Token (JWT)-based "
+                                 "access tokens for named users'."},
+        "notes": "Tokens are refreshed when each agent session starts; a session longer than the token lifetime may need a retry.",
+        "config": {"transport": "http", "url": "https://api.salesforce.com/platform/mcp/v1/{{environment}}/{{server}}",
+                   "auth_header": "Authorization", "auth_scheme": "Bearer", "timeout_s": 120, "auth_type": "oauth2",
+                   "oauth": _salesforce_oauth(["mcp_api", "refresh_token"])},
+    },
+]
+
+# --------------------------------------------------------------------------- SAP
+
+_ODATA_QUERY = {
+    "$filter": {"type": "string", "description": "OData filter, e.g. CreationDate ge datetime'2026-01-01T00:00:00'"},
+    "$select": {"type": "string", "description": "Comma-separated properties"},
+    "$orderby": _STR, "$expand": _STR,
+    "$top": {"type": "integer", "maximum": 1000}, "$skip": {"type": "integer"},
+    "$inlinecount": {"type": "string", "enum": ["allpages", "none"]},
+}
+_SAP_SERVICE = {"type": "string", "pattern": r"^[A-Z][A-Z0-9_]{2,60}$", "description": "OData service, e.g. API_BUSINESS_PARTNER"}
+_SAP_ENTITY = {"type": "string", "pattern": r"^[A-Za-z][A-Za-z0-9_]{1,60}$", "description": "Entity set, e.g. A_BusinessPartner"}
+_KEY = {"type": "string", "pattern": r"^[A-Za-z0-9_-]{1,40}$"}
+_JSON = {"$format": "json"}
+
+
+def _sap_read_ops() -> list[dict[str, Any]]:
+    return [
+        {"name": "odata_query", "description": "Read any entity set of an OData V2 service the communication arrangement "
+                                               "exposes, with $filter/$select/$top paging.",
+         "method": "GET", "path": "/{service}/{entity_set}", "default_query": {**_JSON, "$top": "50"},
+         "params_schema": _props(["service", "entity_set"], service=_SAP_SERVICE, entity_set=_SAP_ENTITY, **_ODATA_QUERY)},
+        {"name": "list_business_partners", "description": "Business partners (customers, suppliers, contacts).",
+         "method": "GET", "path": "/API_BUSINESS_PARTNER/A_BusinessPartner",
+         "default_query": {**_JSON, "$top": "50", "$select": "BusinessPartner,BusinessPartnerFullName,BusinessPartnerCategory,"
+                                                              "BusinessPartnerGrouping,CreationDate"},
+         "params_schema": _props(**_ODATA_QUERY)},
+        {"name": "get_business_partner", "description": "One business partner; $expand=to_BusinessPartnerAddress for addresses.",
+         "method": "GET", "path": "/API_BUSINESS_PARTNER/A_BusinessPartner('{business_partner}')", "default_query": _JSON,
+         "params_schema": _props(["business_partner"], business_partner=_KEY, **{"$select": _STR, "$expand": _STR})},
+        {"name": "list_sales_orders", "description": "Sales orders with sold-to party, amounts and processing status.",
+         "method": "GET", "path": "/API_SALES_ORDER_SRV/A_SalesOrder",
+         "default_query": {**_JSON, "$top": "50", "$select": "SalesOrder,SalesOrderType,SoldToParty,TotalNetAmount,"
+                                                              "TransactionCurrency,OverallSDProcessStatus,CreationDate"},
+         "params_schema": _props(**_ODATA_QUERY)},
+        {"name": "get_sales_order", "description": "One sales order; $expand=to_Item for its items.",
+         "method": "GET", "path": "/API_SALES_ORDER_SRV/A_SalesOrder('{sales_order}')", "default_query": _JSON,
+         "params_schema": _props(["sales_order"], sales_order=_KEY, **{"$select": _STR, "$expand": _STR})},
+        {"name": "list_products", "description": "Product master data.",
+         "method": "GET", "path": "/API_PRODUCT_SRV/A_Product",
+         "default_query": {**_JSON, "$top": "50", "$select": "Product,ProductType,ProductGroup,BaseUnit,CreationDate"},
+         "params_schema": _props(**_ODATA_QUERY)},
+    ]
+
+
+CONNECTORS += [
+    {
+        "key": "sap_s4hana",
+        "name": "SAP S4HANA",
+        "vendor": "SAP",
+        "type": "http",
+        "category": "business_api",
+        "summary": "Business partners, sales orders, products and any other released OData V2 API of SAP S/4HANA Cloud "
+                   "(or on-premise via SAP Gateway). Writes use SAP's CSRF-token handshake and wait for approval.",
+        "docs_url": "https://api.sap.com/products/SAPS4HANACloud/apis/ODATA",
+        "params": [
+            {"key": "host", "label": "API host", "normalize": "host",
+             "pattern": r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+(:\d{2,5})?$",
+             "help": "e.g. my123456-api.s4hana.cloud.sap. On-premise hosts on a private network must also be listed in "
+                     "SCA_ALLOWED_PRIVATE_HOSTS."},
+            {"key": "username", "label": "Communication user", "pattern": r"^[A-Za-z0-9_.@-]{1,64}$",
+             "help": "The communication user of the communication arrangement (e.g. SAP_COM_0008 for business partners, "
+                     "SAP_COM_0109 for sales orders, SAP_COM_0009 for products)."},
+        ],
+        "credential": {"label": "Communication user password",
+                       "help": "Stored encrypted. Grant the communication user only the arrangements the agents need."},
+        "notes": "Basic authentication with a communication user is SAP's standard for S/4HANA Cloud communication "
+                 "arrangements. Updates need the entity's ETag: read the record first and pass __metadata.etag as if_match.",
+        "config": {
+            "base_url": "https://{{host}}/sap/opu/odata/sap",
+            "auth": {"type": "basic", "username": "{{username}}"},
+            "default_headers": {"Accept": "application/json"},
+            "csrf": {"header": "X-CSRF-Token", "fetch_path": "/API_BUSINESS_PARTNER/"},
+            "health_check_path": "/API_BUSINESS_PARTNER/A_BusinessPartner?$top=1&$format=json",
+            "rate_limit_per_min": 120,
+            "timeout_s": 60,
+            "operations": _sap_read_ops() + [
+                {"name": "update_business_partner", "description": "Change fields of a business partner (PATCH). Pass the "
+                                                                   "ETag from a prior read as if_match. Waits for human approval.",
+                 "method": "PATCH", "path": "/API_BUSINESS_PARTNER/A_BusinessPartner('{business_partner}')",
+                 "requires_approval": True, "enabled": False, "header_params": {"if_match": "If-Match"},
+                 "params_schema": _props(["business_partner", "if_match", "body"], business_partner=_KEY,
+                                         if_match={"type": "string"}, body=_OBJ)},
+                {"name": "create_sales_order", "description": "Create a sales order with items (deep insert via to_Item). "
+                                                              "Waits for human approval.",
+                 "method": "POST", "path": "/API_SALES_ORDER_SRV/A_SalesOrder", "requires_approval": True, "enabled": False,
+                 "params_schema": _props(["body"], body=_OBJ)},
+            ],
+        },
+    },
+    {
+        "key": "sap_api_sandbox",
+        "name": "SAP API Sandbox",
+        "vendor": "SAP",
+        "type": "http",
+        "category": "business_api",
+        "summary": "SAP's public S/4HANA Cloud sandbox on the Business Accelerator Hub: realistic demo data, read-only. "
+                   "Useful for trying SAP agents before connecting a real system.",
+        "docs_url": "https://api.sap.com/api/API_BUSINESS_PARTNER/tryout",
+        "params": [],
+        "credential": {"label": "API key",
+                       "help": "Sign in at api.sap.com and copy your API key (Show API Key on any API page)."},
+        "config": {
+            "base_url": "https://sandbox.api.sap.com/s4hanacloud/sap/opu/odata/sap",
+            "auth": {"type": "api_key_header", "header_name": "APIKey"},
+            "default_headers": {"Accept": "application/json"},
+            "health_check_path": "/API_BUSINESS_PARTNER/A_BusinessPartner?$top=1&$format=json",
+            "rate_limit_per_min": 60,
+            "timeout_s": 60,
+            "operations": _sap_read_ops(),
+        },
+    },
+]
+
 _BY_KEY = {c["key"]: c for c in CONNECTORS}
 
 
@@ -269,6 +492,8 @@ def public_catalog() -> list[dict[str, Any]]:
     for c in CONNECTORS:
         item = {k: c[k] for k in ("key", "name", "vendor", "type", "category", "summary", "docs_url", "params", "credential")}
         item["notes"] = c.get("notes", "")
+        item["auth"] = c.get("auth", "credential" if c.get("credential") else "none")
+        item["oauth_client"] = c.get("oauth_client")
         item["available"], item["unavailable_reason"] = True, ""
         if c["type"] == "mcp" and c["config"].get("transport") == "stdio" and not get_settings().allow_stdio_mcp:
             item["available"] = False
@@ -288,6 +513,8 @@ def _normalize(kind: str | None, value: str) -> str:
     if kind == "shopify_shop":
         v = re.sub(r"^https?://", "", v.lower()).split("/")[0]
         v = v.removesuffix(".myshopify.com")
+    elif kind == "host":
+        v = re.sub(r"^https?://", "", v.lower()).split("/")[0]
     elif kind == "strip_act":
         v = v.removeprefix("act_")
     return v

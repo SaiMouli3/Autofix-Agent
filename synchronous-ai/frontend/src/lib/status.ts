@@ -56,7 +56,7 @@ export const FAILURE: Record<string, { label: string; next: string }> = {
 
 export function integrationState(i: any): "connected" | "disconnected" | "misconfigured" | "error" | "untested" | "proposed" {
   if (i.status === "disabled") return "disconnected";
-  const needsCred = i.type === "http" ? (i.config?.auth?.type ?? "none") !== "none" : false;
+  const needsCred = i.oauth ? true : i.type === "http" ? (i.config?.auth?.type ?? "none") !== "none" : false;
   const invalid = (i.validation ?? []).some((c: any) => !c.ok && c.severity === "error");
   if (invalid || (needsCred && !i.has_credential)) return "misconfigured";
   if (i.health?.checked_at && !i.health.ok) return "error";

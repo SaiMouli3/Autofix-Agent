@@ -4,17 +4,20 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException
+from urllib.parse import quote
+
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from sca.api.deps import Principal, require, scoped
+from sca.api.deps import Principal, current_principal, require, scoped
 from sca.db import get_db
 from sca.agent_config import AgentConfig
 from sca.connectors import ConnectorError, instantiate, public_catalog
 from sca.models import Agent, AgentVersion, AuditEvent, Integration, Secret
-from sca.services import audit
+from sca.services import audit, oauth
 from sca.services.integrations import (
     proposal_from_description,
     proposal_from_openapi,
@@ -25,6 +28,7 @@ from sca.services.integrations import (
 from sca.services.secrets import put_secret
 
 router = APIRouter(prefix="/api/integrations", tags=["integrations"])
+oauth_router = APIRouter(prefix="/api/oauth", tags=["integrations"])
 
 CATEGORIES = ("business_api", "developer_tools", "database", "communication", "documents", "other")
 Category = Literal["business_api", "developer_tools", "database", "communication", "documents", "other"]
@@ -80,6 +84,9 @@ def _out(db: Session, i: Integration, detail: bool = False) -> dict:
            "health": i.health, "last_success_at": i.last_success_at, "created_at": i.created_at,
            "updated_at": i.updated_at, "approved_by": i.approved_by,
            "permitted_agents": _permitted_agents(db, i.org_id, i.id)}
+    if oauth.oauth_settings(i) is not None:
+        out["oauth"] = oauth.status(db, i)
+        out["has_credential"] = out["oauth"]["connected"]
     if detail:
         out["validation"] = validation_report(i.type, i.config)
         out["audit"] = [
@@ -97,15 +104,25 @@ def list_integrations(p: Principal = Depends(require("integrations:read")), db: 
     return [_out(db, i) for i in rows]
 
 
+class OAuthClientIn(BaseModel):
+    client_id: str = Field(min_length=3, max_length=500)
+    client_secret: str | None = Field(default=None, max_length=1000)
+
+
 class ConnectorIn(BaseModel):
     params: dict[str, str] = Field(default_factory=dict)
+    oauth_client: OAuthClientIn | None = None
     name: str | None = Field(default=None, min_length=2, max_length=80, pattern=r"^[A-Za-z0-9][A-Za-z0-9 _.\-]*$")
     credential: str | None = Field(default=None, max_length=4000)
 
 
 @router.get("/connectors")
 def list_connectors(p: Principal = Depends(require("integrations:read"))):
-    return public_catalog()
+    items = public_catalog()
+    for c in items:
+        if c.get("auth") == "oauth2":
+            c["oauth_redirect_uri"] = oauth.redirect_uri()
+    return items
 
 
 @router.post("/connectors/{key}", status_code=201)
@@ -116,9 +133,12 @@ def create_from_connector(key: str, body: ConnectorIn, p: Principal = Depends(re
         spec = instantiate(key, body.params)
     except ConnectorError as exc:
         raise HTTPException(404 if str(exc).startswith("unknown connector") else 422, str(exc)) from exc
+    uses_oauth = (spec["config"].get("auth") or {}).get("type") == "oauth2" or spec["config"].get("auth_type") == "oauth2"
     i = _create(db, p, name=body.name or spec["name"], description=spec["description"], kind=spec["type"],
-                category=spec["category"], config=spec["config"], credential=body.credential,
-                details={"connector": key})
+                category=spec["category"], config=spec["config"],
+                credential=None if uses_oauth else body.credential, details={"connector": key})
+    if uses_oauth and body.oauth_client:
+        oauth.set_client(db, i, body.oauth_client.client_id, body.oauth_client.client_secret, p.user_id)
     db.commit()
     return _out(db, i, detail=True)
 
@@ -183,6 +203,8 @@ def update_integration(integration_id: str, body: IntegrationUpdate,
 def set_credential(integration_id: str, body: CredentialIn, p: Principal = Depends(require("integrations:write")),
                    db: Session = Depends(get_db)):
     i = scoped(db, Integration, integration_id, p, "integration")
+    if oauth.oauth_settings(i) is not None:
+        raise HTTPException(409, "this integration uses OAuth: set the client credentials and use Connect instead")
     sec = put_secret(db, p.org_id, f"integration:{i.id}", "integration", body.credential, p.user_id)
     i.secret_id = sec.id
     audit.record(db, p.org_id, "integration.credential_updated", actor_id=p.user_id, target_type="integration",
@@ -208,7 +230,10 @@ def activate(integration_id: str, p: Principal = Depends(require("integrations:w
     errors = [c for c in report if not c["ok"] and c["severity"] == "error"]
     if errors:
         raise HTTPException(422, {"message": "validation failed", "checks": errors})
-    if i.config.get("auth", {}).get("type", "none") != "none" and not i.secret_id:
+    if oauth.oauth_settings(i) is not None:
+        if not oauth.status(db, i)["connected"]:
+            raise HTTPException(422, "connect (authorize) this integration before activating it")
+    elif i.config.get("auth", {}).get("type", "none") != "none" and not i.secret_id:
         raise HTTPException(422, "attach a credential before activating this integration")
     i.status = "active"
     i.approved_by = p.user_id
@@ -307,3 +332,82 @@ def import_describe(body: DescribeIn, p: Principal = Depends(require("integratio
     db.commit()
     return {"proposal": proposal, "validation": validation_report("http", proposal["config"]),
             "note": "Generated by a model from your documentation. Verify every operation before activation."}
+
+
+# --------------------------------------------------------------------------- OAuth
+
+
+def _oauth_integration(db: Session, integration_id: str, p: Principal) -> Integration:
+    i = scoped(db, Integration, integration_id, p, "integration")
+    if oauth.oauth_settings(i) is None:
+        raise HTTPException(409, "this integration does not use OAuth")
+    return i
+
+
+@router.put("/{integration_id}/oauth/client")
+def set_oauth_client(integration_id: str, body: OAuthClientIn, p: Principal = Depends(require("integrations:write")),
+                     db: Session = Depends(get_db)):
+    """Store the vendor app's client ID/secret (encrypted). Replacing them disconnects the integration."""
+    i = _oauth_integration(db, integration_id, p)
+    oauth.set_client(db, i, body.client_id, body.client_secret, p.user_id)
+    audit.record(db, p.org_id, "integration.oauth_client_set", actor_id=p.user_id, target_type="integration",
+                 target_id=i.id, details={"client_id_prefix": body.client_id[:6]})
+    db.commit()
+    return _out(db, i, detail=True)
+
+
+@router.post("/{integration_id}/oauth/start")
+def start_oauth(integration_id: str, p: Principal = Depends(require("integrations:write")), db: Session = Depends(get_db)):
+    i = _oauth_integration(db, integration_id, p)
+    try:
+        url = oauth.start(db, i, p.user_id)
+    except oauth.OAuthError as exc:
+        raise HTTPException(422, exc.message) from exc
+    audit.record(db, p.org_id, "integration.oauth_started", actor_id=p.user_id, target_type="integration", target_id=i.id)
+    db.commit()
+    return {"authorize_url": url, "redirect_uri": oauth.redirect_uri()}
+
+
+@router.post("/{integration_id}/oauth/disconnect")
+def disconnect_oauth(integration_id: str, p: Principal = Depends(require("integrations:write")),
+                     db: Session = Depends(get_db)):
+    i = _oauth_integration(db, integration_id, p)
+    revoked = oauth.disconnect(db, i)
+    if i.status == "active":
+        i.status = "disabled"
+    audit.record(db, p.org_id, "integration.oauth_disconnected", actor_id=p.user_id, target_type="integration",
+                 target_id=i.id, details={"vendor_revoked": revoked})
+    db.commit()
+    return {"integration": _out(db, i, detail=True), "vendor_revoked": revoked}
+
+
+@oauth_router.get("/callback")
+def oauth_callback(request: Request, state: str = "", code: str = "", error: str = "", error_description: str = "",
+                   db: Session = Depends(get_db)):
+    """Vendor redirect target. Completes the flow for the signed-in user who started it, then
+    returns to the integration page. Errors are reported via the query string, never tokens."""
+
+    def back(integration_id: str | None, **qs: str) -> RedirectResponse:
+        params = "&".join(f"{k}={quote(v[:200])}" for k, v in qs.items())
+        target = "/integrations?" + (f"id={integration_id}&" if integration_id else "") + params
+        return RedirectResponse(target, status_code=303)
+
+    try:
+        p = current_principal(request, db)
+    except HTTPException:
+        return back(None, oauth_error="Sign in to the platform, then click Connect again.")
+    if not p.can("integrations:write"):
+        return back(None, oauth_error="Your role cannot authorize integrations.")
+    if error:
+        return back(None, oauth_error=f"The provider returned '{error}': {error_description or 'authorization was not granted'}")
+    try:
+        i = oauth.complete(db, state, code, p.user_id, p.org_id)
+    except oauth.OAuthError as exc:
+        db.rollback()
+        audit.record(db, p.org_id, "integration.oauth_failed", actor_id=p.user_id, details={"code": exc.code})
+        db.commit()
+        return back(None, oauth_error=exc.message)
+    audit.record(db, p.org_id, "integration.oauth_connected", actor_id=p.user_id, target_type="integration",
+                 target_id=i.id, details={"scope": oauth.status(db, i)["scope"]})
+    db.commit()
+    return back(i.id, oauth="connected")

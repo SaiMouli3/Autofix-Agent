@@ -27,6 +27,15 @@ from sca.security.redaction import redact, redact_text
 from sca.services.secrets import read_secret
 
 WRITE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+_CREDENTIAL_HEADERS = {"authorization", "cookie", "x-api-key", "proxy-authorization", "apikey",
+                       "x-shopify-access-token", "x-csrf-token"}
+
+
+def _is_allowed_private(url: str) -> bool:
+    """Test/dev escape hatch: hosts explicitly allow-listed in SCA_ALLOWED_PRIVATE_HOSTS."""
+    from urllib.parse import urlparse
+
+    return (urlparse(url).hostname or "") in set(get_settings().allowed_private_hosts)
 
 
 class Operation(BaseModel):
@@ -46,6 +55,16 @@ class Operation(BaseModel):
     fixed_body: dict[str, Any] = Field(default_factory=dict)
     # Query parameters sent unless the agent supplies its own value.
     default_query: dict[str, str] = Field(default_factory=dict)
+    # Arguments sent as request headers instead of body/query, e.g. {"if_match": "If-Match"}.
+    header_params: dict[str, str] = Field(default_factory=dict)
+
+    @field_validator("header_params")
+    @classmethod
+    def _safe_header_params(cls, v: dict[str, str]) -> dict[str, str]:
+        for header in v.values():
+            if header.lower() in _CREDENTIAL_HEADERS or not re.fullmatch(r"[A-Za-z0-9-]{1,64}", header):
+                raise ValueError(f"header '{header}' cannot be set from agent arguments")
+        return v
 
     @field_validator("path")
     @classmethod
@@ -55,9 +74,40 @@ class Operation(BaseModel):
         return v
 
 
+class OAuthSettings(BaseModel):
+    """OAuth 2.0 authorization-code flow (with PKCE) used to obtain and refresh access tokens."""
+
+    model_config = ConfigDict(extra="forbid")
+    authorize_url: str
+    token_url: str
+    revoke_url: str = ""
+    scopes: list[str] = Field(default_factory=list)
+    pkce: bool = True
+    extra_authorize_params: dict[str, str] = Field(default_factory=dict)
+    # Token-response field carrying the account's API host (Salesforce: instance_url). When set,
+    # the integration's base URL is re-pointed at that host after authorization.
+    base_url_from_token: str = ""
+
+    @field_validator("authorize_url", "token_url", "revoke_url")
+    @classmethod
+    def _https(cls, v: str) -> str:
+        if v and not v.startswith("https://") and not _is_allowed_private(v):
+            raise ValueError("OAuth endpoints must use https")
+        return v
+
+
+class CsrfConfig(BaseModel):
+    """Fetch-then-send CSRF protection (SAP Gateway / OData): before a write, GET ``fetch_path``
+    with ``<header>: Fetch`` and replay the returned token and session cookies."""
+
+    model_config = ConfigDict(extra="forbid")
+    header: str = "X-CSRF-Token"
+    fetch_path: str = ""
+
+
 class AuthConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    type: Literal["none", "bearer", "api_key_header", "api_key_query", "basic"] = "none"
+    type: Literal["none", "bearer", "api_key_header", "api_key_query", "basic", "oauth2"] = "none"
     header_name: str = "X-API-Key"
     query_name: str = "api_key"
     username: str = ""
@@ -72,12 +122,14 @@ class HttpConfig(BaseModel):
     rate_limit_per_min: int = Field(default=60, ge=1, le=10_000)
     timeout_s: float = Field(default=30, ge=1, le=120)
     operations: list[Operation] = Field(default_factory=list)
+    oauth: OAuthSettings | None = None
+    csrf: CsrfConfig | None = None
 
     @field_validator("default_headers")
     @classmethod
     def _no_auth_headers(cls, v: dict[str, str]) -> dict[str, str]:
         for k in v:
-            if k.lower() in ("authorization", "cookie", "x-api-key", "proxy-authorization"):
+            if k.lower() in _CREDENTIAL_HEADERS:
                 raise ValueError("credentials must be stored as a secret, not as a default header")
         return v
 
@@ -92,11 +144,15 @@ class McpConfig(BaseModel):
     args: list[str] = Field(default_factory=list)
     timeout_s: float = Field(default=60, ge=5, le=600)
     allowed_tools: list[str] = Field(default_factory=list)  # empty = all tools the server exposes
+    auth_type: Literal["static", "oauth2"] = "static"
+    oauth: OAuthSettings | None = None
 
 
 def validate_config(kind: str, config: dict[str, Any]) -> dict[str, Any]:
     if kind == "http":
         cfg = HttpConfig.model_validate(config)
+        if cfg.auth.type == "oauth2" and cfg.oauth is None:
+            raise ValueError("oauth2 authentication needs an 'oauth' section")
         names = [o.name for o in cfg.operations]
         if len(names) != len(set(names)):
             raise ValueError("operation names must be unique")
@@ -110,6 +166,8 @@ def validate_config(kind: str, config: dict[str, Any]) -> dict[str, Any]:
         return cfg.model_dump()
     if kind == "mcp":
         cfg = McpConfig.model_validate(config)
+        if cfg.auth_type == "oauth2" and (cfg.oauth is None or cfg.transport == "stdio"):
+            raise ValueError("oauth2 MCP servers need an 'oauth' section and an http/sse transport")
         if cfg.transport == "stdio":
             if not get_settings().allow_stdio_mcp:
                 raise ValueError("stdio MCP servers are disabled (SCA_ALLOW_STDIO_MCP=false)")
@@ -131,11 +189,25 @@ class IntegrationError(Exception):
         self.message = message
 
 
+def _oauth_token(integ: Integration, *, force: bool = False, stale: str | None = None) -> str:
+    from sca.services import oauth
+
+    try:
+        return oauth.access_token(integ.id, force_refresh=force, stale_token=stale)
+    except oauth.OAuthError as exc:
+        raise IntegrationError(exc.code, exc.message) from exc
+
+
 def _auth(cfg: HttpConfig, secret: str | None) -> tuple[dict[str, str], dict[str, str], tuple[str, str] | None]:
     headers: dict[str, str] = {}
     params: dict[str, str] = {}
     basic = None
     t = cfg.auth.type
+    if t == "oauth2":
+        if not secret:
+            raise IntegrationError("not_connected", "this integration has not been authorized yet; use Connect")
+        headers["Authorization"] = f"Bearer {secret}"
+        return headers, params, basic
     if t != "none" and not secret:
         raise IntegrationError("missing_credential", "integration credential is not configured")
     if t == "bearer":
@@ -215,10 +287,14 @@ def call_operation(db: Session, integ: Integration, op_name: str, args: dict[str
         check_url(url)
     except BlockedTarget as exc:
         raise IntegrationError("blocked_target", str(exc)) from exc
-    secret = read_secret(db, integ.secret_id, integ.org_id)
+    oauth2 = cfg.auth.type == "oauth2"
+    secret = _oauth_token(integ) if oauth2 else read_secret(db, integ.secret_id, integ.org_id)
     headers, params, basic = _auth(cfg, secret)
     headers = {**cfg.default_headers, **headers, "User-Agent": "SynchronousConsultingAI/0.1"}
     rest = {k: v for k, v in args.items() if k not in used}
+    for arg, header in op.header_params.items():
+        if arg in rest:
+            headers[header] = str(rest.pop(arg))
     body = rest.pop("body", None)
     # GraphQL operations take {query, variables} as the JSON body; "query" is the document,
     # not URL query parameters.
@@ -244,21 +320,46 @@ def call_operation(db: Session, integ: Integration, op_name: str, args: dict[str
     params.update({k: str(v) for k, v in query.items()})
     max_bytes = get_settings().integration_max_response_bytes
     t0 = time.monotonic()
+
+    def send(client: httpx.Client, hdrs: dict[str, str]) -> tuple[int, str, bytes]:
+        with client.stream(op.method, url, params=params, headers=hdrs,
+                           json=body if body is not None else None) as resp:
+            chunks, size = [], 0
+            for chunk in resp.iter_bytes():
+                size += len(chunk)
+                if size > max_bytes:
+                    raise IntegrationError("response_too_large", f"response exceeded {max_bytes} bytes")
+                chunks.append(chunk)
+            return resp.status_code, resp.headers.get("content-type", ""), b"".join(chunks)
+
+    def csrf_token(client: httpx.Client, hdrs: dict[str, str]) -> str:
+        # SAP Gateway: fetch a token (and session cookies, kept by the client) before a write.
+        fetch_url = cfg.base_url.rstrip("/") + (cfg.csrf.fetch_path or "/")
+        check_url(fetch_url)
+        r = client.get(fetch_url, headers={**hdrs, cfg.csrf.header: "Fetch"}, params=dict(params))
+        tok = r.headers.get(cfg.csrf.header, "")
+        if not tok or tok.lower() == "required":
+            raise IntegrationError("csrf_failed", f"could not obtain a CSRF token (HTTP {r.status_code})")
+        return tok
+
     try:
         with httpx.Client(timeout=cfg.timeout_s, follow_redirects=False, auth=basic) as client:
-            with client.stream(op.method, url, params=params, headers=headers,
-                               json=body if body is not None else None) as resp:
-                chunks, size = [], 0
-                for chunk in resp.iter_bytes():
-                    size += len(chunk)
-                    if size > max_bytes:
-                        raise IntegrationError("response_too_large", f"response exceeded {max_bytes} bytes")
-                    chunks.append(chunk)
-                raw = b"".join(chunks)
-                status = resp.status_code
-                ctype = resp.headers.get("content-type", "")
+            if cfg.csrf and op.method in WRITE_METHODS:
+                headers[cfg.csrf.header] = csrf_token(client, headers)
+            status, ctype, raw = send(client, headers)
+            if status == 401 and oauth2:
+                # Expired or revoked access token: refresh once (rotation-safe) and retry.
+                fresh = _oauth_token(integ, force=True, stale=secret)
+                headers["Authorization"] = f"Bearer {fresh}"
+                status, ctype, raw = send(client, headers)
+            elif status == 403 and cfg.csrf and op.method in WRITE_METHODS:
+                # SAP answers 403 "CSRF token validation failed" when the session token expired.
+                headers[cfg.csrf.header] = csrf_token(client, headers)
+                status, ctype, raw = send(client, headers)
     except httpx.TimeoutException as exc:
         raise IntegrationError("timeout", f"request timed out after {cfg.timeout_s}s") from exc
+    except BlockedTarget as exc:
+        raise IntegrationError("blocked_target", str(exc)) from exc
     except httpx.HTTPError as exc:
         raise IntegrationError("network_error", f"request failed: {type(exc).__name__}") from exc
     text = raw.decode("utf-8", errors="replace")
@@ -289,9 +390,10 @@ def build_mcp_server(db: Session, integ: Integration):
     from openhands.sdk.mcp.config import MCPServer
 
     cfg = McpConfig.model_validate(integ.config)
-    secret = read_secret(db, integ.secret_id, integ.org_id)
     if cfg.transport == "stdio":
         return MCPServer(command=cfg.command, args=cfg.args, timeout=cfg.timeout_s)
+    # OAuth tokens are fetched (and refreshed if near expiry) when the agent session starts.
+    secret = _oauth_token(integ) if cfg.auth_type == "oauth2" else read_secret(db, integ.secret_id, integ.org_id)
     check_url(cfg.url)
     headers = {}
     if secret:
@@ -319,10 +421,15 @@ def test_connection(db: Session, integ: Integration) -> dict[str, Any]:
             cfg = HttpConfig.model_validate(integ.config)
             url = cfg.base_url.rstrip("/") + (cfg.health_check_path or "")
             check_url(url)
-            secret = read_secret(db, integ.secret_id, integ.org_id)
+            oauth2 = cfg.auth.type == "oauth2"
+            secret = _oauth_token(integ) if oauth2 else read_secret(db, integ.secret_id, integ.org_id)
             headers, params, basic = _auth(cfg, secret)
             r = httpx.get(url, headers={**cfg.default_headers, **headers}, params=params, auth=basic,
                           timeout=cfg.timeout_s, follow_redirects=False)
+            if r.status_code == 401 and oauth2:
+                headers["Authorization"] = f"Bearer {_oauth_token(integ, force=True, stale=secret)}"
+                r = httpx.get(url, headers={**cfg.default_headers, **headers}, params=params,
+                              timeout=cfg.timeout_s, follow_redirects=False)
             result["status_code"] = r.status_code
             result["ok"] = r.status_code < 400
             result["detail"] = f"HTTP {r.status_code} from {redact_text(url)}"
@@ -335,7 +442,7 @@ def test_connection(db: Session, integ: Integration) -> dict[str, Any]:
                 result["ok"] = True
             else:
                 check_url(cfg.url)
-                secret = read_secret(db, integ.secret_id, integ.org_id)
+                secret = _oauth_token(integ) if cfg.auth_type == "oauth2" else read_secret(db, integ.secret_id, integ.org_id)
                 headers = {}
                 if secret:
                     headers[cfg.auth_header] = f"{cfg.auth_scheme} {secret}".strip() if cfg.auth_scheme else secret

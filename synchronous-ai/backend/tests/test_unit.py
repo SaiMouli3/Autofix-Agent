@@ -164,14 +164,21 @@ def test_connectors_instantiate_and_validate():
 
     params = {"shopify_admin": {"shop": "https://Acme-Store.myshopify.com/admin"},
               "meta_marketing": {"ad_account_id": "act_1234567890"},
-              "whatsapp_cloud": {"phone_number_id": "1098765432", "waba_id": "2233445566"}}
+              "whatsapp_cloud": {"phone_number_id": "1098765432", "waba_id": "2233445566"},
+              "salesforce": {"login_host": "https://Acme.my.salesforce.com/"},
+              "sap_s4hana": {"host": "my123456-api.s4hana.cloud.sap", "username": "COMM_USER"},  # not resolvable
+              "sap_api_sandbox": {}}
     for c in CONNECTORS:
         if c["type"] != "http":
             continue
         spec = instantiate(c["key"], params[c["key"]])
         cfg = validate_config("http", spec["config"])
         assert "{{" not in json.dumps(cfg)
-        assert all(x["ok"] for x in validation_report("http", spec["config"])), c["key"]
+        report = [x for x in validation_report("http", spec["config"]) if not x["ok"]]
+        if c["key"] == "sap_s4hana":  # the example tenant host does not exist, so only DNS may fail
+            assert [x["check"] for x in report] == ["network_policy"]
+        else:
+            assert not report, c["key"]
         for op in cfg["operations"]:
             # Every operation that can change external data waits for a human.
             if op["method"] != "GET" and op.get("graphql") != "query":
@@ -191,3 +198,29 @@ def test_connectors_instantiate_and_validate():
     cat = {c["key"]: c for c in public_catalog()}
     assert cat["shopify_dev_mcp"]["available"] is False  # stdio MCP is off by default
     assert all("shpat_" not in json.dumps(c["config"]) for c in CONNECTORS)
+
+
+def test_salesforce_and_sap_connectors():
+    from sca.connectors import instantiate
+
+    sf = validate_config("http", instantiate("salesforce", {"login_host": "test.salesforce.com"})["config"])
+    assert sf["auth"]["type"] == "oauth2" and sf["oauth"]["pkce"] and sf["oauth"]["base_url_from_token"] == "instance_url"
+    assert sf["oauth"]["token_url"] == "https://test.salesforce.com/services/oauth2/token"
+    assert sf["oauth"]["scopes"] == ["api", "refresh_token"]
+    ops = {o["name"]: o for o in sf["operations"]}
+    assert ops["soql_query"]["method"] == "GET" and ops["soql_query"]["enabled"]
+    assert ops["delete_record"]["destructive"] and not ops["delete_record"]["enabled"]
+    assert all(o["requires_approval"] for o in sf["operations"] if o["method"] != "GET")
+    mcp = validate_config("mcp", instantiate("salesforce_mcp", {"environment": "sandbox"})["config"])
+    assert mcp["url"].endswith("/v1/sandbox/sobject-reads") and mcp["oauth"]["scopes"] == ["mcp_api", "refresh_token"]
+    sap = validate_config("http", instantiate("sap_s4hana", {"host": "my1-api.s4hana.cloud.sap", "username": "U1"})["config"])
+    assert sap["auth"] == {"type": "basic", "header_name": "X-API-Key", "query_name": "api_key", "username": "U1"}
+    assert sap["csrf"]["header"] == "X-CSRF-Token"
+    upd = next(o for o in sap["operations"] if o["name"] == "update_business_partner")
+    assert upd["header_params"] == {"if_match": "If-Match"} and upd["requires_approval"]
+    with pytest.raises(ValidationError):  # credentials can never be set from agent arguments
+        validate_config("http", {"base_url": "https://x.example.com", "operations": [
+            {"name": "x", "path": "/x", "header_params": {"token": "Authorization"}}]})
+    with pytest.raises(ValidationError):  # OAuth endpoints must be https
+        validate_config("http", {"base_url": "https://x.example.com", "auth": {"type": "oauth2"},
+                                 "oauth": {"authorize_url": "http://evil.example.com/a", "token_url": "https://x/t"}})

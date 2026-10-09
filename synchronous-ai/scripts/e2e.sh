@@ -13,6 +13,7 @@ if curl -fsS "http://127.0.0.1:$PORT/healthz" >/dev/null 2>&1; then
 fi
 (cd "$ROOT/frontend" && npm run build >/dev/null)
 (cd "$ROOT/backend" && exec env -u EXP_LABS_API_KEY SCA_DATA_DIR="$DATA" SCA_INTERNAL_BASE_URL="http://127.0.0.1:$PORT" \
+  SCA_PUBLIC_BASE_URL="http://127.0.0.1:$PORT" SCA_ALLOWED_PRIVATE_HOSTS=127.0.0.1 \
   "$PY" -m uvicorn sca.main:app --host 127.0.0.1 --port "$PORT" >"$LOG" 2>&1) &
 SERVER=$!
 trap 'kill $SERVER 2>/dev/null || true; wait $SERVER 2>/dev/null || true; rm -rf "$DATA"' EXIT

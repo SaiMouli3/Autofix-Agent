@@ -30,6 +30,21 @@
 * Tests assert the live provider key never appears in task events, API responses, the frontend
   bundle or the server log.
 
+### Integration OAuth tokens
+
+- **Storage:** OAuth client secrets, access tokens and refresh tokens are held in one Fernet-encrypted
+  secret per integration. They are registered for log redaction and are never returned by the API.
+  The API reports only connection state, scopes, expiry and a 6-character client-ID hint.
+- **Authorization requests:** each uses PKCE S256 and a 256-bit state. Only the state's SHA-256 is
+  stored. A state is single-use, expires after 10 minutes, and is bound to the organization and the
+  user who started it. Another signed-in user cannot complete it.
+- **Endpoints:** token and authorize URLs must be https and pass the outbound network policy. A
+  vendor-supplied `instance_url` is checked the same way before it becomes the API host.
+- **Refresh:** refreshes are serialized and committed independently, which handles refresh-token
+  rotation. `invalid_grant` marks the integration as needing reauthorization instead of retrying forever.
+- **Callback URL:** `SCA_PUBLIC_BASE_URL` determines the registered callback URL. In production it
+  must be the public https origin.
+
 ## Agent containment
 
 * **Tool permissions** — only granted OpenHands tools are instantiated; platform tools are filtered
