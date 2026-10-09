@@ -387,6 +387,8 @@ class Integration(Base):
     name: Mapped[str] = mapped_column(String(80))
     description: Mapped[str] = mapped_column(Text, default="")
     type: Mapped[str] = mapped_column(String(20))  # http | mcp
+    # business_api | developer_tools | database | communication | documents | other
+    category: Mapped[str] = mapped_column(String(40), default="business_api", server_default="business_api")
     config: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     secret_id: Mapped[str | None] = mapped_column(ForeignKey("secrets.id", ondelete="SET NULL"), nullable=True)
     status: Mapped[str] = mapped_column(String(20), default="proposed")  # proposed | active | disabled

@@ -78,9 +78,10 @@ published per-token rates. OpenAI, Anthropic and any other OpenAI-compatible end
 ## Tests
 
 ```bash
-cd backend && pytest -m "not live and not docker"     # 44 offline tests (SQLite; set SCA_DATABASE_URL for Postgres)
+cd backend && pytest -m "not live and not docker"     # 48 offline tests (SQLite; set SCA_DATABASE_URL for Postgres)
 EXP_LABS_API_KEY=... pytest -m live                    # 8 tests on the real runtime + real provider
 EXP_LABS_API_KEY=... ../scripts/e2e.sh                 # Playwright browser flow (fresh instance)
+cd frontend && npm run test:ui                         # MOCKED UI-state tests (no backend; fixtures only)
 ```
 
 See [docs/TESTING.md](docs/TESTING.md) for coverage and the latest recorded results.

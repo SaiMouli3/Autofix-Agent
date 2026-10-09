@@ -5,11 +5,18 @@
 | Unit | `pytest tests/test_unit.py` | nothing |
 | Offline integration (real server, real OpenHands runtime, DB, workers) | `pytest -m "not live and not docker"` | nothing (set `SCA_DATABASE_URL` to run on PostgreSQL) |
 | Live (real runtime + real model provider) | `EXP_LABS_API_KEY=… pytest -m live` | provider key, internet |
-| Browser E2E (Playwright, fresh instance) | `EXP_LABS_API_KEY=… scripts/e2e.sh` | provider key, Chromium |
+| Browser E2E (Playwright, fresh instance) | `EXP_LABS_API_KEY=… scripts/e2e.sh platform.spec` | provider key, Chromium |
+| **Mocked** UI states (Playwright, no backend) | `cd frontend && npm run test:ui` | Chromium |
 
 Mock providers are used in exactly one place: `tests/test_api.py` starts a tiny OpenAI-compatible
 server to **inject failures** (HTTP 401 and 503) and a scripted fallback reply, which a real
 provider cannot be made to produce on demand. Everything else runs against the real stack.
+
+The second, clearly separated exception is `frontend/e2e/ui-states.mocked.spec.ts`: it serves the
+built bundle and answers `/api` with fixtures copied from real responses, to exercise UI states that
+cannot be produced on demand (empty data, HTTP 500 + retry, 401 redirect, viewer role, 403 state,
+approval confirmation incl. CSRF header, dialog focus trap, Ctrl+K, mobile drawer). It never
+claims anything about backend behaviour.
 
 ## Coverage map
 
@@ -40,23 +47,26 @@ API responses.
 
 **E2E** (Chromium via Playwright, real provider) — the 14-step acceptance flow: sign-in/setup;
 provider configured and tested in the UI; agent created through the 7-step wizard; model and tools
-selected; configuration persists across reload; task submitted in chat; live events visible; result
+selected (risky-tool and no-approval confirmations); configuration persists; task submitted in the
+agent workspace composer; live events visible; result
 saved and displayed; second agent; both execute concurrently; both histories accessible; a viewer
 cannot create agents/tasks or traverse workspaces, anonymous access is refused; the provider key is
 absent from the JS/CSS bundle, API responses and the server log.
 
-## Recorded results (2026-10-09, this commit)
+## Recorded results (2026-10-09, this commit — frontend redesign)
 
 | Suite | Result |
 |---|---|
-| Unit + offline integration, SQLite | **44 passed** (28.6 s) |
-| Unit + offline integration, PostgreSQL 16 | **44 passed** (31.0 s) |
-| Live, Experiential Labs | **8 passed** (61.9 s) |
-| Browser E2E, Experiential Labs | **1 passed** (20.8 s) |
-| `ruff` (error classes) | clean |
-| `pip-audit` | no known vulnerabilities |
-| `npm audit --omit=dev` | 0 high/critical; 2 moderate in react-router (fix only in v7, see SECURITY.md) |
+| Unit + offline integration, SQLite | **48 passed** (28.1 s) |
+| Browser E2E through the redesigned UI, Experiential Labs | **1 passed** (24.7 s) |
+| Mocked UI-state tests | **9 passed** (9.7 s) |
+| `ruff` (CI error classes) | clean |
+| `npm audit --omit=dev --audit-level=high` | passes; 2 moderate in react-router (fix only in v7, see SECURITY.md) |
 | Frontend typecheck + production build | clean |
+| Provider key in `dist/` or tracked files | not found |
+
+Not re-run for this commit (backend runtime code unchanged since): PostgreSQL suite (last: 44 passed
+before the 4 new API tests were added) and the live pytest suite (last: 8 passed).
 
 Manually verified (not automated in CI because it needs Docker-in-Docker and the 4.6 GB sandbox
 image): a task on the **docker runtime** ran inside a resource-limited OpenHands agent-server

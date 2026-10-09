@@ -1,462 +1,521 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  Activity,
-  FileStack,
+  Ban,
+  Check,
+  ChevronDown,
+  ChevronRight,
+  Copy,
+  FileText,
+  FolderOpen,
   History,
-  LayoutDashboard,
-  MessageSquare,
-  Plus,
+  MoreHorizontal,
+  PanelRightClose,
+  PanelRightOpen,
+  Play,
   Power,
   RotateCcw,
-  ScrollText,
   Send,
   Settings2,
-  Square,
+  X,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
-import {
-  Config,
-  Identity,
-  IdentitySection,
-  KnowledgeSection,
-  ModelSection,
-  PolicySection,
-  RoleSection,
-  ToolsSection,
-} from "../components/AgentForm";
-import { FilesBrowser } from "../components/FilesBrowser";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { BotMark } from "../components/BotMark";
 import { Shell, useLive } from "../components/Shell";
 import { Timeline } from "../components/Timeline";
-import { AgentAvatar, Empty, ErrorBox, KV, Loading, Notice, Pager, StatusBadge, Tabs, useToast } from "../components/ui";
+import { Alert, Dots, Empty, ErrorState, KV, Menu, Skeleton, Status, Tabs, Tag, useConfirm, useToast } from "../components/ui";
 import { api, qs } from "../lib/api";
-import { dateTime, duration, num, timeAgo, usd } from "../lib/format";
+import { bytes, clock, duration, elapsedSince, fullDateTime, num, shortId, timeAgo, usd } from "../lib/format";
+import { usePref } from "../lib/prefs";
 import { useSession } from "../lib/session";
+import { ACTIVE_TASK_STATES, FAILURE, statusOf } from "../lib/status";
 import { ActivityEvent, useActivityStream } from "../lib/stream";
 
-type Tab = "overview" | "chat" | "activity" | "history" | "files" | "settings" | "logs";
+const TOOL_ACCESS: Record<string, string> = {
+  terminal: "execute", file_editor: "write", task_tracker: "internal", grep: "read", glob: "read", browser: "execute",
+  knowledge_search: "read", integrations: "external", delegation: "delegate",
+};
 
 export default function AgentWorkspace() {
-  const { agentId = "", tab = "overview" } = useParams();
-  const nav = useNavigate();
+  const { agentId = "" } = useParams();
+  const [sp, setSp] = useSearchParams();
+  const qc = useQueryClient();
   const { markSeen } = useLive();
-  const agent = useQuery({ queryKey: ["agents", agentId], queryFn: () => api.get(`/api/agents/${agentId}`), refetchInterval: 8000 });
-  useEffect(() => markSeen(agentId), [agentId, markSeen, agent.dataUpdatedAt]);
+  const [ctxOpen, setCtxOpen] = usePref("ws.context", true);
+  const [drawer, setDrawer] = useState(false);
+  const composerRef = useRef<HTMLTextAreaElement>(null);
+
+  const agent = useQuery({ queryKey: ["agents", agentId], queryFn: ({ signal }) => api.get(`/api/agents/${agentId}`, signal), refetchInterval: 10000 });
+  const sessions = useQuery({ queryKey: ["sessions", agentId], queryFn: ({ signal }) => api.get(`/api/sessions?agent_id=${agentId}&page_size=50`, signal), refetchInterval: 10000 });
+  const sessionParam = sp.get("session");
+  const taskParam = sp.get("task");
+  const sessionList: any[] = sessions.data?.items ?? [];
+  // Session shown in the thread: explicit, or the one owning the selected task, or the latest.
+  const taskDetail = useQuery({ queryKey: ["task", taskParam], queryFn: ({ signal }) => api.get(`/api/tasks/${taskParam}`, signal), enabled: !!taskParam, refetchInterval: 4000 });
+  const sessionId = sessionParam === "new" ? "" : sessionParam || taskDetail.data?.session_id || (taskParam ? "" : sessionList[0]?.id ?? "");
+  const pendingTask = taskParam && taskDetail.data && !taskDetail.data.session_id ? taskDetail.data : null;
+
+  const thread = useQuery({
+    queryKey: ["tasks", "thread", agentId, sessionId],
+    queryFn: ({ signal }) => api.get(`/api/tasks${qs({ agent_id: agentId, session_id: sessionId, top_level: true, page_size: 50, sort: "created", order: "asc" })}`, signal),
+    enabled: !!sessionId,
+    refetchInterval: 6000,
+  });
+  const turns: any[] = useMemo(() => {
+    const list: any[] = sessionId ? thread.data?.items ?? [] : [];
+    if (pendingTask && !list.some((t) => t.id === pendingTask.id)) return [...list, pendingTask];
+    return list;
+  }, [thread.data, sessionId, pendingTask]);
+  const selectedId = taskParam ?? turns[turns.length - 1]?.id ?? null;
+
+  useEffect(() => markSeen(agentId), [agentId, markSeen]);
+
+  // Live updates: append streamed events to per-task caches and refresh affected task state.
+  const refreshTimer = useRef<number | null>(null);
+  const stream = useActivityStream((e: ActivityEvent) => {
+    qc.setQueryData<ActivityEvent[]>(["task-events", e.task_id], (old) => (old && !old.some((x) => x.id === e.id) ? [...old, e] : old));
+    if (["status", "approval", "artifact", "message"].includes(e.type)) {
+      if (refreshTimer.current === null)
+        refreshTimer.current = window.setTimeout(() => {
+          refreshTimer.current = null;
+          qc.invalidateQueries({ queryKey: ["tasks", "thread", agentId] });
+          qc.invalidateQueries({ queryKey: ["task"] });
+          qc.invalidateQueries({ queryKey: ["agents", agentId] });
+          qc.invalidateQueries({ queryKey: ["sessions", agentId] });
+          qc.invalidateQueries({ queryKey: ["artifacts", e.task_id] });
+        }, 400);
+    }
+  }, { agentId });
+
+  const select = useCallback((taskId: string) => {
+    const n = new URLSearchParams(sp);
+    n.set("task", taskId);
+    setSp(n, { replace: true });
+    if (window.matchMedia("(max-width: 1080px)").matches) setDrawer(true);
+  }, [sp, setSp]);
+  const setSession = (sid: string) => {
+    const n = new URLSearchParams();
+    n.set("session", sid || "new");
+    setSp(n, { replace: true });
+  };
+
+  if (agent.isLoading) return <Shell crumbs={[{ label: "Agents", to: "/agents" }, { label: "…" }]}><Skeleton h={48} /><Skeleton h={300} style={{ marginTop: 16 }} /></Shell>;
+  if (agent.isError) return <Shell crumbs={[{ label: "Agents", to: "/agents" }, { label: "Unavailable" }]}><ErrorState error={agent.error} onRetry={() => agent.refetch()} what="this agent" /></Shell>;
   const a = agent.data;
-  const tabs: { key: Tab; label: string; icon: any; count?: number }[] = [
-    { key: "overview", label: "Overview", icon: LayoutDashboard },
-    { key: "chat", label: "Chat & tasks", icon: MessageSquare, count: (a?.task_counts?.running ?? 0) + (a?.task_counts?.queued ?? 0) },
-    { key: "activity", label: "Live activity", icon: Activity },
-    { key: "history", label: "Task history", icon: History },
-    { key: "files", label: "Files & artifacts", icon: FileStack },
-    { key: "settings", label: "Tools & settings", icon: Settings2 },
-    { key: "logs", label: "Logs & traces", icon: ScrollText },
-  ];
+  const activeTask = turns.find((t) => ACTIVE_TASK_STATES.includes(t.status));
+  const stateForMark = a.status !== "active" ? a.status : a.live_status;
+  const currentSession = sessionList.find((s) => s.id === sessionId);
+
   return (
-    <Shell crumbs={<span><Link to="/agents">My Agents</Link> / {a?.name ?? "…"}</span>}>
-      {agent.isLoading && <Loading />}
-      <ErrorBox error={agent.error} title="Agent unavailable" />
-      {a && (
-        <>
-          <div className="page-head">
-            <div className="row" style={{ alignItems: "flex-start", gap: 14 }}>
-              <AgentAvatar avatar={a.avatar} size="lg" status={a.live_status} />
-              <div>
-                <div className="row"><h1 style={{ margin: 0 }}>{a.name}</h1><StatusBadge status={a.live_status} /></div>
-                <p className="small">{a.category} · v{a.current_version} · owner {a.owner?.name ?? "—"}{a.team ? ` · team ${a.team.name}` : ""}</p>
-              </div>
-            </div>
-            <AgentActions a={a} />
+    <Shell full crumbs={[{ label: "Agents", to: "/agents" }, { label: a.name }]}>
+      <div className={`ws ${ctxOpen ? "" : "ctx-off"} ${drawer ? "ctx-drawer" : ""}`}>
+        <div className="ws-main">
+          <WorkspaceHeader a={a} state={stateForMark} activeTask={activeTask} onRun={() => composerRef.current?.focus()}
+            ctxOpen={ctxOpen} onToggleCtx={() => (window.matchMedia("(max-width: 1080px)").matches ? setDrawer(!drawer) : setCtxOpen(!ctxOpen))} />
+          <div className="ws-bar">
+            <label className="tiny muted" htmlFor="session-select">Session</label>
+            <select id="session-select" value={sessionParam === "new" ? "" : sessionId} onChange={(e) => setSession(e.target.value)} className="ws-session" style={{ height: 28, fontSize: 12.5 }}>
+              <option value="">New session</option>
+              {sessionList.map((s) => <option key={s.id} value={s.id}>{(s.title || "Session").slice(0, 60)} · {timeAgo(s.last_active_at)}{s.active ? " · running" : ""}</option>)}
+            </select>
+            <span className="tiny muted hide-sm">
+              {sessionId ? (currentSession?.continuable ? "Follow-ups share this session's files and conversation memory." : "Closed session: follow-ups start a new session.") : "A new task starts a fresh session with its own workspace."}
+            </span>
+            <span className="grow" />
+            <span className="tiny muted row" style={{ gap: 6 }} aria-live="polite">
+              <span style={{ width: 6, height: 6, borderRadius: 3, background: stream === "live" ? "var(--success)" : "var(--faint)" }} aria-hidden />
+              {stream === "live" ? "Live" : stream === "reconnecting" ? "Reconnecting…" : "Connecting…"}
+            </span>
           </div>
-          <Tabs tabs={tabs} value={tab as Tab} onChange={(t) => nav(`/agents/${agentId}/${t === "overview" ? "" : t}`)} />
-          {tab === "overview" && <OverviewTab a={a} />}
-          {tab === "chat" && <ChatTab a={a} />}
-          {tab === "activity" && <ActivityTab a={a} />}
-          {tab === "history" && <HistoryTab a={a} />}
-          {tab === "files" && <FilesTab a={a} />}
-          {tab === "settings" && <SettingsTab a={a} />}
-          {tab === "logs" && <LogsTab a={a} />}
-        </>
-      )}
+          <div className="ws-scroll" id="thread">
+            <Thread agent={a} turns={turns} loading={!!sessionId && thread.isLoading} error={thread.error} selectedId={selectedId} onSelect={select} />
+          </div>
+          <Composer agent={a} sessionId={sessionId} continuable={!sessionId || !!currentSession?.continuable} busy={!!activeTask && !!sessionId}
+            textareaRef={composerRef} onSubmitted={(t) => { const n = new URLSearchParams(); if (sessionId) n.set("session", sessionId); n.set("task", t.id); setSp(n, { replace: true }); }} />
+        </div>
+        <ContextPanel agent={a} taskId={selectedId} onClose={() => (drawer ? setDrawer(false) : setCtxOpen(false))} />
+      </div>
     </Shell>
   );
 }
 
-function AgentActions({ a }: { a: any }) {
+// ------------------------------------------------------------------ header
+
+function WorkspaceHeader({ a, state, activeTask, onRun, ctxOpen, onToggleCtx }: { a: any; state: string; activeTask: any; onRun: () => void; ctxOpen: boolean; onToggleCtx: () => void }) {
   const { can } = useSession();
+  const nav = useNavigate();
   const qc = useQueryClient();
   const toast = useToast();
-  const nav = useNavigate();
+  const confirm = useConfirm();
   const setStatus = useMutation({
     mutationFn: (status: string) => api.post(`/api/agents/${a.id}/status`, { status }),
-    onSuccess: (_, s) => { qc.invalidateQueries({ queryKey: ["agents"] }); toast("ok", `Agent ${s === "active" ? "activated" : s}`); },
+    onSuccess: (_, s) => { qc.invalidateQueries({ queryKey: ["agents"] }); toast("ok", s === "active" ? `${a.name} activated` : `${a.name} disabled`); },
     onError: (e: any) => toast("error", e.message),
   });
+  const cancel = useMutation({
+    mutationFn: (id: string) => api.post(`/api/tasks/${id}/cancel`),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["tasks"] }); toast("ok", "Cancellation requested. The agent stops at its next step."); },
+    onError: (e: any) => toast("error", e.message),
+  });
+  const s = statusOf(state);
   return (
-    <div className="row">
-      {can("tasks:create") && a.status === "active" && <button className="btn primary" onClick={() => nav(`/agents/${a.id}/chat`)}><Send /> Assign task</button>}
-      {can("agents:write") && a.status !== "active" && <button className="btn success" onClick={() => setStatus.mutate("active")}><Power /> Activate</button>}
-      {can("agents:write") && a.status === "active" && <button className="btn ghost" onClick={() => confirm("Disable this agent? Queued tasks will not start.") && setStatus.mutate("disabled")}><Power /> Disable</button>}
+    <header className="ws-head">
+      <BotMark seed={a.id} avatar={a.avatar} size={38} state={state} title={`${a.name}, ${s.label}`} />
+      <div className="grow" style={{ minWidth: 0 }}>
+        <div className="row ws-title" style={{ gap: 10 }}>
+          <h1 className="ellipsis">{a.name}</h1>
+          <Status status={state} />
+        </div>
+        <div className="ws-meta">
+          <span>{a.config.role || a.category}</span>
+          <span className="sep" aria-hidden />
+          <span className="mono" title="Model">{a.config.model.model}</span>
+          {activeTask && (<><span className="sep" aria-hidden /><span className="ellipsis" style={{ maxWidth: 320 }}>Working on “{activeTask.title}”</span></>)}
+        </div>
+      </div>
+      {activeTask && can("tasks:cancel") && (
+        <button className="btn sm danger hide-sm" onClick={async () => {
+          if (await confirm({ title: "Cancel this execution?", body: `“${activeTask.title}” will stop at the agent's next step. Work already done stays in the workspace.`, confirmLabel: "Cancel execution", danger: true })) cancel.mutate(activeTask.id);
+        }}><Ban /> Cancel execution</button>
+      )}
+      {can("tasks:create") && <button className="btn sm dark" onClick={onRun} disabled={a.status !== "active"} title={a.status !== "active" ? "Activate the agent to run tasks" : undefined} aria-label="Run task"><Play /> <span className="hide-sm">Run task</span></button>}
+      <button className="btn ghost icon sm hide-sm" onClick={onToggleCtx} aria-label={ctxOpen ? "Hide details panel" : "Show details panel"} data-tip={ctxOpen ? "Hide panel" : "Show panel"}>
+        {ctxOpen ? <PanelRightClose /> : <PanelRightOpen />}
+      </button>
+      <Menu label="Agent actions" trigger={(p) => <button {...p} className="btn ghost icon sm" aria-label="More actions"><MoreHorizontal /></button>} items={[
+        { label: "Edit configuration", icon: Settings2, onSelect: () => nav(`/agents/${a.id}/settings`), disabled: !can("agents:write"), hint: "Requires agent administration rights" },
+        { label: "Task history", icon: History, onSelect: () => nav(`/tasks?agent=${a.id}`) },
+        { label: "Workspace files", icon: FolderOpen, onSelect: () => nav(`/workspaces?agent=${a.id}`) },
+        { label: "Show details panel", icon: PanelRightOpen, onSelect: onToggleCtx },
+        { label: "", separator: true },
+        a.status === "active"
+          ? { label: "Disable agent", icon: Power, danger: true, disabled: !can("agents:write"), hint: "Requires agent administration rights", onSelect: async () => {
+            if (await confirm({ title: `Disable ${a.name}?`, body: "Queued tasks will not start and nobody can assign new tasks until it is re-activated. Running executions continue. History is kept.", confirmLabel: "Disable", danger: true })) setStatus.mutate("disabled");
+          } }
+          : { label: "Activate agent", icon: Power, disabled: !can("agents:write"), onSelect: () => setStatus.mutate("active") },
+      ]} />
+    </header>
+  );
+}
+
+// ------------------------------------------------------------------ thread
+
+function Thread({ agent, turns, loading, error, selectedId, onSelect }: { agent: any; turns: any[]; loading: boolean; error: any; selectedId: string | null; onSelect: (id: string) => void }) {
+  const end = useRef<HTMLDivElement>(null);
+  const last = turns[turns.length - 1];
+  useEffect(() => { end.current?.scrollIntoView({ block: "end" }); }, [turns.length, last?.status]);
+  if (loading) return <div className="thread"><Skeleton h={60} /><Skeleton h={120} /></div>;
+  if (error) return <div className="thread"><ErrorState error={error} what="this session" /></div>;
+  if (!turns.length)
+    return (
+      <div className="thread">
+        <Empty title={`Give ${agent.name} a task`}>
+          {agent.config.objective || agent.description || "Describe the outcome you need. The agent plans, uses its permitted tools, and reports back with results and files."}
+        </Empty>
+        <StarterHints agent={agent} />
+      </div>
+    );
+  return (
+    <div className="thread" aria-live="polite" aria-relevant="additions">
+      {turns.map((t) => <Turn key={t.id} t={t} agent={agent} selected={t.id === selectedId} onSelect={() => onSelect(t.id)} />)}
+      <div ref={end} />
     </div>
   );
 }
 
-// ------------------------------------------------------------------ overview
-
-function OverviewTab({ a }: { a: any }) {
-  const c = a.config;
-  const tasks = useQuery({ queryKey: ["tasks", { agent_id: a.id, recent: true }], queryFn: () => api.get(`/api/tasks?agent_id=${a.id}&page_size=8&top_level=true`), refetchInterval: 8000 });
-  const nav = useNavigate();
+function StarterHints({ agent }: { agent: any }) {
+  const tools: string[] = agent.config.tools;
+  const hints = [
+    tools.includes("knowledge_search") && "Answer questions from assigned company knowledge, with citations",
+    tools.includes("terminal") && "Write and run scripts in a sandboxed workspace",
+    tools.includes("file_editor") && "Produce reports and files you can download",
+    tools.includes("integrations") && "Call approved business APIs through the governed gateway",
+    tools.includes("delegation") && "Delegate sub-tasks to permitted agents",
+  ].filter(Boolean) as string[];
+  if (!hints.length) return null;
   return (
-    <div className="split">
-      <div className="stack">
-        <div className="card">
-          <div className="card-title">Purpose</div>
-          <p className="muted" style={{ marginTop: 0 }}>{a.description || "No description."}</p>
-          <KV items={[["Role", c.role || "—"], ["Objective", c.objective || "—"], ["Expected outputs", c.expected_outputs || "—"], ["Completion criteria", c.completion_criteria || "—"]]} />
-        </div>
-        <div className="card flush">
-          <div className="card-head"><b>Recent tasks</b><Link className="btn xs ghost" to={`/agents/${a.id}/history`}>All</Link></div>
-          {tasks.data?.items?.length === 0 && <Empty title="No tasks yet">Use “Assign task” to give this agent its first assignment.</Empty>}
-          <table className="table"><tbody>
-            {tasks.data?.items?.map((t: any) => (
-              <tr key={t.id} className="click" onClick={() => nav(`/tasks/${t.id}`)}>
-                <td><StatusBadge status={t.status} /></td><td className="ellipsis" style={{ maxWidth: 380 }}>{t.title}</td>
-                <td className="faint small nowrap">{timeAgo(t.created_at)}</td><td className="faint small">{duration(t.duration_s)}</td>
-              </tr>
-            ))}
-          </tbody></table>
-        </div>
-      </div>
-      <div className="stack">
-        <div className="card">
-          <div className="card-title">Configuration</div>
-          <KV items={[
-            ["Model", <span key="m">{c.model.model}<div className="faint tiny">{a.provider?.name} · {a.provider?.status}</div></span>],
-            ["Fallback", c.model.fallback_model ?? "none"],
-            ["Tools", <div key="t" className="pill-list">{c.tools.map((t: string) => <span key={t} className="badge outline">{t}</span>)}</div>],
-            ["Integrations", String(c.integrations.length)],
-            ["Knowledge", String(c.knowledge_sources.length) + " sources"],
-            ["Approvals", c.policy.approval_mode],
-            ["Concurrency", `${c.policy.max_concurrent_tasks} parallel tasks`],
-            ["Timeout", `${c.policy.task_timeout_s}s · ${c.policy.max_retries} retries`],
-            ["Budget", `${c.policy.budget_usd_per_task != null ? usd(c.policy.budget_usd_per_task) : "∞"}/task · ${c.policy.budget_usd_monthly != null ? usd(c.policy.budget_usd_monthly) : "∞"}/month`],
-          ]} />
-        </div>
-        <div className="card">
-          <div className="card-title">Task totals</div>
-          <div className="grid cols-2" style={{ gap: 8 }}>
-            {["running", "queued", "waiting_for_approval", "completed", "failed", "cancelled"].map((s) => (
-              <div key={s} className="row small"><StatusBadge status={s} /><b>{a.task_counts?.[s] ?? 0}</b></div>
-            ))}
+    <div className="panel" style={{ padding: "12px 16px" }}>
+      <div className="section-title">This agent can</div>
+      <ul className="small muted" style={{ margin: 0, paddingLeft: 18 }}>{hints.map((h) => <li key={h}>{h}</li>)}</ul>
+    </div>
+  );
+}
+
+function Turn({ t, agent, selected, onSelect }: { t: any; agent: any; selected: boolean; onSelect: () => void }) {
+  const { me } = useSession();
+  const terminal = !ACTIVE_TASK_STATES.includes(t.status);
+  const detail = useQuery({ queryKey: ["task", t.id], queryFn: ({ signal }) => api.get(`/api/tasks/${t.id}`, signal), staleTime: terminal ? 60_000 : 2_000 });
+  const d = detail.data ?? t;
+  const [expanded, setExpanded] = useState(false);
+  const requester = d.requested_by_name ?? (d.requested_by === me.user.id ? me.user.name : d.schedule_id ? "Schedule" : "Someone");
+  const instructions: string = d.instructions ?? t.title;
+  const long = instructions.length > 600;
+  return (
+    <article className="turn" aria-label={`Task ${t.title}`}>
+      <div className="msg-user">
+        <span className="initials" style={{ background: "var(--surface-3)", color: "var(--ink-2)", width: 26, height: 26 }} aria-hidden>{requester.slice(0, 1).toUpperCase()}</span>
+        <div>
+          <div className="msg-head"><b>{requester}</b><time dateTime={t.created_at} title={fullDateTime(t.created_at)}>{timeAgo(t.created_at)}</time>
+            {t.priority !== 5 && <Tag>priority {t.priority}</Tag>}{t.schedule_id && <Tag>scheduled</Tag>}</div>
+          <div className="body prose">{long && !expanded ? `${instructions.slice(0, 600)}…` : instructions}
+            {long && <button className="disclose" style={{ display: "block", marginTop: 4 }} onClick={() => setExpanded(!expanded)}>{expanded ? "Show less" : "Show full instructions"}</button>}
           </div>
         </div>
       </div>
+      <div className="msg-agent">
+        <BotMark seed={agent.id} avatar={agent.avatar} size={26} state={t.status === "running" ? "running" : undefined} />
+        <div className="body">
+          <div className="msg-head">
+            <b>{agent.name}</b><Status status={t.status} />
+            {t.duration_s != null && <span className="num">{duration(t.duration_s)}</span>}
+            {t.status === "running" && t.started_at && <span className="num">{duration(elapsedSince(t.started_at))}</span>}
+            {t.usage?.prompt_tokens ? <span className="num">{num((t.usage.prompt_tokens ?? 0) + (t.usage.completion_tokens ?? 0))} tokens</span> : null}
+            <span className="grow" />
+            <button className={`btn xs ${selected ? "" : "ghost"}`} onClick={onSelect} aria-pressed={selected}>{selected ? "Shown in activity" : "Show activity"}</button>
+          </div>
+          <TurnBody t={d} onSelect={onSelect} />
+        </div>
+      </div>
+    </article>
+  );
+}
+
+function TurnBody({ t, onSelect }: { t: any; onSelect: () => void }) {
+  const { can } = useSession();
+  const qc = useQueryClient();
+  const toast = useToast();
+  const retry = useMutation({
+    mutationFn: () => api.post(`/api/tasks/${t.id}/retry`),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["tasks"] }); toast("ok", "Resubmitted as a new task"); },
+    onError: (e: any) => toast("error", e.message),
+  });
+  const events = useQuery({ queryKey: ["task-events", t.id], queryFn: ({ signal }) => api.get(`/api/tasks/${t.id}/events?limit=2000`, signal), staleTime: Infinity });
+  const steps = (events.data ?? []).filter((e: ActivityEvent) => ["tool_call", "knowledge", "integration", "delegation"].includes(e.type));
+  const lastEvent = (events.data ?? []).filter((e: ActivityEvent) => e.type !== "status").slice(-1)[0];
+  const artifacts = useQuery({ queryKey: ["artifacts", t.id], queryFn: ({ signal }) => api.get(`/api/tasks/${t.id}/artifacts`, signal), enabled: !ACTIVE_TASK_STATES.includes(t.status) });
+  const pendingApproval = (t.approvals ?? []).find((x: any) => x.status === "pending");
+  const failure = t.error_category && t.status !== "completed" && t.status !== "queued" ? FAILURE[t.error_category] ?? FAILURE.runtime : null;
+  return (
+    <div>
+      {t.status === "queued" && <p className="small muted" style={{ margin: 0 }}>{t.error ? `Retry scheduled after: ${t.error.message}` : "Waiting for a free worker…"}</p>}
+      {t.status === "running" && (
+        <p className="small row" style={{ margin: 0, color: "var(--info)" }}>
+          <Dots /> <span className="ellipsis" style={{ color: "var(--ink-2)" }}>{lastEvent ? lastEvent.summary : "Starting the runtime…"}</span>
+        </p>
+      )}
+      {pendingApproval && <InlineApproval approval={pendingApproval} taskId={t.id} canDecide={can("approvals:decide")} />}
+      {steps.length > 0 && <ExecSummary steps={steps} live={t.status === "running"} onSelect={onSelect} />}
+      {t.status === "completed" && (t.result_summary ? <div className="prose mt8">{t.result_summary}</div> : <p className="small muted">Completed without a written summary.</p>)}
+      {failure && (
+        <div className="mt8">
+          <Alert kind={t.status === "cancelled" ? "neutral" : "error"} actions={can("tasks:create") && <button className="btn xs" onClick={() => retry.mutate()} disabled={retry.isPending}><RotateCcw /> Retry</button>}>
+            <b>{failure.label}.</b> {t.error?.message ? <span className="mono" style={{ fontSize: 12 }}>{String(t.error.message).slice(0, 280)}</span> : null}
+            <div className="tiny mt4">{failure.next}</div>
+          </Alert>
+        </div>
+      )}
+      {(artifacts.data?.length ?? 0) > 0 && (
+        <div className="row wrap mt8" aria-label="Generated files">
+          {artifacts.data.map((f: any) => (
+            <Link key={f.id} className="tag outline" to={`/tasks/${t.id}?tab=artifacts&file=${encodeURIComponent(f.path)}`} title={`${f.path} · ${bytes(f.size)}`}>
+              <FileText size={12} aria-hidden /> <span className="mono">{f.path}</span>
+            </Link>
+          ))}
+        </div>
+      )}
+      {(t.children?.length ?? 0) > 0 && (
+        <div className="tiny muted mt8">Delegated: {t.children.map((c: any) => <Link key={c.child_task_id} to={`/tasks/${c.child_task_id}`} style={{ color: "var(--accent)", marginRight: 8 }}>{c.objective.slice(0, 50)} ({statusOf(c.status).label})</Link>)}</div>
+      )}
     </div>
   );
 }
 
-// ------------------------------------------------------------------ chat & tasks
+function ExecSummary({ steps, live, onSelect }: { steps: ActivityEvent[]; live: boolean; onSelect: () => void }) {
+  const [open, setOpen] = useState(false);
+  const tools = Array.from(new Set(steps.map((s) => s.data?.tool ?? s.type)));
+  return (
+    <div className="exec-card">
+      <button className="exec-head" onClick={() => setOpen(!open)} aria-expanded={open}>
+        {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+        <span><b className="num">{steps.length}</b> step{steps.length === 1 ? "" : "s"}{live ? " so far" : ""}</span>
+        <span className="muted ellipsis">· {tools.slice(0, 4).join(", ")}{tools.length > 4 ? ` +${tools.length - 4}` : ""}</span>
+        <span className="grow" />
+        <span className="disclose" role="link" tabIndex={0} onClick={(e) => { e.stopPropagation(); onSelect(); }} onKeyDown={(e) => e.key === "Enter" && onSelect()}>Full timeline</span>
+      </button>
+      {open && (
+        <ol className="exec-list" style={{ listStyle: "none", margin: 0 }}>
+          {steps.slice(-30).map((s) => (
+            <li key={s.id} className="row small" style={{ padding: "3px 0" }}>
+              <time className="mono faint" dateTime={s.ts} style={{ width: 62 }}>{clock(s.ts)}</time>
+              <span className="tag mono">{s.data?.tool ?? s.type}</span>
+              <span className="ellipsis grow">{s.summary}</span>
+            </li>
+          ))}
+        </ol>
+      )}
+    </div>
+  );
+}
 
-function ChatTab({ a }: { a: any }) {
+function InlineApproval({ approval, taskId, canDecide }: { approval: any; taskId: string; canDecide: boolean }) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const confirm = useConfirm();
+  const decide = useMutation({
+    mutationFn: (decision: string) => api.post(`/api/approvals/${approval.id}/decide`, { decision }),
+    onSuccess: (r) => { qc.invalidateQueries({ queryKey: ["task", taskId] }); qc.invalidateQueries({ queryKey: ["approvals-count"] }); toast("ok", r.status === "approved" ? "Approved — the agent will continue" : "Rejected — the agent was told not to proceed"); },
+    onError: (e: any) => toast("error", e.message),
+  });
+  return (
+    <div className="approval-card" role="group" aria-label="Approval required">
+      <div className="small"><b>Approval required.</b> {approval.summary}</div>
+      <div className="row mt8">
+        {canDecide ? (
+          <>
+            <button className="btn xs dark" disabled={decide.isPending} onClick={async () => {
+              if (await confirm({ title: "Approve this action?", body: <>The agent will perform: <b>{approval.summary}</b>. This is recorded in the audit log.</>, confirmLabel: "Approve" })) decide.mutate("approved");
+            }}><Check /> Approve</button>
+            <button className="btn xs" disabled={decide.isPending} onClick={() => decide.mutate("rejected")}><X /> Reject</button>
+          </>
+        ) : <span className="tiny muted">Waiting for an approver.</span>}
+        <Link className="disclose" to="/approvals">Inspect full request →</Link>
+      </div>
+    </div>
+  );
+}
+
+// ------------------------------------------------------------------ composer
+
+function Composer({ agent, sessionId, continuable, busy, textareaRef, onSubmitted }: {
+  agent: any; sessionId: string; continuable: boolean; busy: boolean; textareaRef: React.RefObject<HTMLTextAreaElement>; onSubmitted: (t: any) => void;
+}) {
   const { can } = useSession();
   const qc = useQueryClient();
   const toast = useToast();
-  const nav = useNavigate();
-  const sessions = useQuery({ queryKey: ["sessions", a.id], queryFn: () => api.get(`/api/sessions?agent_id=${a.id}&page_size=30`), refetchInterval: 10000 });
-  const [sessionId, setSessionId] = useState<string>("");
   const [text, setText] = useState("");
   const [priority, setPriority] = useState(5);
-  const tasks = useQuery({
-    queryKey: ["tasks", { session: sessionId, agent: a.id }],
-    queryFn: () => api.get(`/api/tasks${qs({ agent_id: a.id, session_id: sessionId, page_size: 50, top_level: true })}`),
-    refetchInterval: 4000,
-  });
-  const endRef = useRef<HTMLDivElement>(null);
-  const items = useMemo(() => [...(tasks.data?.items ?? [])].reverse(), [tasks.data]);
-  useEffect(() => endRef.current?.scrollIntoView({ block: "end" }), [items.length]);
-  useActivityStream(() => qc.invalidateQueries({ queryKey: ["tasks", { session: sessionId, agent: a.id }] }), { agentId: a.id });
-
   const submit = useMutation({
-    mutationFn: () => api.post(`/api/agents/${a.id}/tasks`, { instructions: text, priority, session_id: sessionId || null }, { "Idempotency-Key": crypto.randomUUID() }),
-    onSuccess: (t) => { setText(""); qc.invalidateQueries({ queryKey: ["tasks"] }); toast("ok", "Task queued"); if (!sessionId && t.session_id) setSessionId(t.session_id); },
+    mutationFn: () => api.post(`/api/agents/${agent.id}/tasks`, { instructions: text.trim(), priority, session_id: sessionId && continuable ? sessionId : null }, { "Idempotency-Key": crypto.randomUUID() }),
+    onSuccess: (t) => { setText(""); qc.invalidateQueries({ queryKey: ["tasks"] }); qc.invalidateQueries({ queryKey: ["sessions", agent.id] }); onSubmitted(t); },
     onError: (e: any) => toast("error", e.message),
   });
-  const cancel = useMutation({ mutationFn: (id: string) => api.post(`/api/tasks/${id}/cancel`), onSuccess: () => qc.invalidateQueries({ queryKey: ["tasks"] }), onError: (e: any) => toast("error", e.message) });
-  const retry = useMutation({ mutationFn: (id: string) => api.post(`/api/tasks/${id}/retry`), onSuccess: () => qc.invalidateQueries({ queryKey: ["tasks"] }), onError: (e: any) => toast("error", e.message) });
-  const current = sessions.data?.items?.find((s: any) => s.id === sessionId);
-  const sessionBusy = current?.active;
-
+  if (!can("tasks:create")) return <div className="composer-wrap"><Alert kind="neutral">Your role can view this agent but not assign tasks.</Alert></div>;
+  const reason = agent.status !== "active" ? `${agent.name} is ${agent.status}. Activate it to assign tasks.`
+    : busy ? "This session has an active task. Wait for it to finish, or start a new session." : null;
+  const p = agent.config.policy;
   return (
-    <div className="grid" style={{ gridTemplateColumns: "260px minmax(0,1fr)", alignItems: "start" }}>
-      <div className="card" style={{ padding: 10 }}>
-        <button className={`btn block ${!sessionId ? "primary" : ""}`} onClick={() => setSessionId("")}><Plus /> New session</button>
-        <div className="section-title mt16" style={{ padding: "0 4px" }}>Execution sessions</div>
-        {sessions.data?.items?.length === 0 && <div className="faint small" style={{ padding: 6 }}>Each task starts a session; follow-ups can continue one.</div>}
-        <div className="stack" style={{ gap: 2 }}>
-          {sessions.data?.items?.map((s: any) => (
-            <button key={s.id} className={`step ${s.id === sessionId ? "on" : ""}`} onClick={() => setSessionId(s.id)} style={{ alignItems: "flex-start" }}>
-              <span className={`status-dot ${s.active ? "running" : s.status === "active" ? "completed" : "disabled"}`} style={{ marginTop: 6 }} />
-              <span className="grow" style={{ minWidth: 0 }}>
-                <div className="small strong ellipsis">{s.title || "Session"}</div>
-                <div className="faint tiny">{s.task_count} task(s) · {timeAgo(s.last_active_at)}{!s.continuable ? " · closed" : ""}</div>
-              </span>
-            </button>
-          ))}
+    <div className="composer-wrap">
+      <form className="composer" onSubmit={(e) => { e.preventDefault(); if (text.trim() && !reason) submit.mutate(); }}>
+        <label htmlFor="composer" className="sr-only">Task instructions for {agent.name}</label>
+        <textarea id="composer" ref={textareaRef} value={text} disabled={!!reason}
+          placeholder={reason ?? (sessionId && continuable ? `Follow up with ${agent.name}…` : `Describe a task for ${agent.name}…`)}
+          onChange={(e) => setText(e.target.value)} rows={3}
+          onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && text.trim() && !reason) { e.preventDefault(); submit.mutate(); } }} />
+        <div className="composer-foot">
+          <span className="tiny muted ellipsis grow">
+            {sessionId && continuable ? "Continues this session" : "New session"} · approvals: {p.approval_mode} · timeout {Math.round(p.task_timeout_s / 60)} min
+          </span>
+          <label className="sr-only" htmlFor="prio">Priority</label>
+          <select id="prio" value={priority} onChange={(e) => setPriority(Number(e.target.value))} title="Priority">
+            <option value={2}>Low priority</option><option value={5}>Normal priority</option><option value={8}>High priority</option><option value={10}>Urgent</option>
+          </select>
+          <span className="kbd hide-sm" aria-hidden>Ctrl ↵</span>
+          <button className="btn primary sm" type="submit" disabled={!text.trim() || !!reason || submit.isPending}><Send /> {submit.isPending ? "Submitting…" : "Run"}</button>
         </div>
+      </form>
+    </div>
+  );
+}
+
+// ------------------------------------------------------------------ context panel
+
+function ContextPanel({ agent, taskId, onClose }: { agent: any; taskId: string | null; onClose: () => void }) {
+  const [tab, setTab] = usePref<"activity" | "details">("ws.ctxTab", "activity");
+  const task = useQuery({ queryKey: ["task", taskId], queryFn: ({ signal }) => api.get(`/api/tasks/${taskId}`, signal), enabled: !!taskId });
+  const events = useQuery({ queryKey: ["task-events", taskId], queryFn: ({ signal }) => api.get(`/api/tasks/${taskId}/events?limit=2000`, signal), enabled: !!taskId, staleTime: Infinity });
+  const artifacts = useQuery({ queryKey: ["artifacts", taskId], queryFn: ({ signal }) => api.get(`/api/tasks/${taskId}/artifacts`, signal), enabled: !!taskId });
+  const t = task.data;
+  const refs = (events.data ?? []).filter((e: ActivityEvent) => e.type === "knowledge").flatMap((e: ActivityEvent) => e.data.sources ?? []);
+  const uniqRefs = Array.from(new Map(refs.map((r: any) => [`${r.source}/${r.document}`, r])).values()) as any[];
+  return (
+    <aside className="ctx" aria-label="Execution details">
+      <div className="row" style={{ padding: "0 8px 0 0", borderBottom: "1px solid var(--border)" }}>
+        <div className="grow"><Tabs label="Details panel" value={tab} onChange={setTab} tabs={[{ key: "activity", label: "Activity", count: events.data?.length }, { key: "details", label: "Details" }]} /></div>
+        <button className="btn ghost icon sm" onClick={onClose} aria-label="Close details panel"><PanelRightClose /></button>
       </div>
-      <div className="card">
-        <Notice>
-          {sessionId ? (current?.continuable ? "Follow-up tasks continue this session: same workspace files and conversation memory." : "This session is closed (Docker sandboxes are removed after each run). Start a new session to continue.")
-            : "A new task starts a fresh execution session with its own workspace. The agent profile (instructions, tools, policies) is shared across sessions."}
-        </Notice>
-        <div className="chat mt16" style={{ minHeight: 200 }}>
-          {!sessionId && items.length > 0 && <div className="faint tiny">Showing recent tasks across all sessions.</div>}
-          {items.length === 0 && <div className="faint small">No tasks in this view yet.</div>}
-          {items.map((t: any) => (
-            <div key={t.id} className="stack" style={{ gap: 8 }}>
-              <div className="bubble user">
-                <div className="who">Task · {timeAgo(t.created_at)} · priority {t.priority}</div>
-                <div className="md">{t.title}</div>
-              </div>
-              <div className="bubble agent">
-                <div className="who">
-                  <StatusBadge status={t.status} /> {a.name}
-                  {t.duration_s != null && <span>· {duration(t.duration_s)}</span>}
-                  {t.usage?.prompt_tokens ? <span>· {num((t.usage.prompt_tokens ?? 0) + (t.usage.completion_tokens ?? 0))} tokens</span> : null}
-                  <Link to={`/tasks/${t.id}`} className="btn xs ghost">details</Link>
-                  {["queued", "running", "waiting_for_approval"].includes(t.status) && can("tasks:cancel") && (
-                    <button className="btn xs danger" onClick={() => cancel.mutate(t.id)}><Square /> Cancel</button>
-                  )}
-                  {["failed", "timed_out", "cancelled"].includes(t.status) && can("tasks:create") && (
-                    <button className="btn xs" onClick={() => retry.mutate(t.id)}><RotateCcw /> Retry</button>
-                  )}
-                </div>
-                <TaskResult t={t} onOpen={() => nav(`/tasks/${t.id}`)} />
-              </div>
-            </div>
-          ))}
-          <div ref={endRef} />
+      {!taskId && <Empty title="No task selected">Select a task in the thread to inspect its execution.</Empty>}
+      {taskId && tab === "activity" && (
+        <div className="ctx-section" style={{ borderBottom: 0 }}>
+          {t && <div className="small strong ellipsis mb8" title={t.title} style={{ marginBottom: 10 }}>{t.title}</div>}
+          {events.isLoading ? <Skeleton h={120} /> : <Timeline events={events.data ?? []} compact />}
+          {t?.status === "running" && <p className="tiny muted row mt8"><Dots /> Streaming live</p>}
+          <p className="tiny faint mt12">Tool calls, results and outputs only. Private model reasoning is never stored or shown.</p>
         </div>
-        {can("tasks:create") ? (
-          <div className="composer mt16">
-            <textarea value={text} placeholder={a.status !== "active" ? "Activate the agent to assign tasks." : sessionId ? "Follow-up instructions for this session…" : "Describe a task for this agent…"}
-              disabled={a.status !== "active"} onChange={(e) => setText(e.target.value)} aria-label="Task instructions"
-              onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && text.trim()) submit.mutate(); }} />
-            <div className="row between">
-              <label className="row small faint">Priority
-                <select value={priority} onChange={(e) => setPriority(Number(e.target.value))} style={{ width: 140, height: 30 }}>
-                  {[1, 3, 5, 7, 9, 10].map((p) => <option key={p} value={p}>{p}{p === 5 ? " (normal)" : p >= 9 ? " (high)" : p <= 3 ? " (low)" : ""}</option>)}
-                </select>
-              </label>
-              <div className="row">
-                <span className="faint tiny">Ctrl/⌘ + Enter</span>
-                <button className="btn primary" disabled={!text.trim() || submit.isPending || a.status !== "active" || (!!sessionId && (sessionBusy || !current?.continuable))} onClick={() => submit.mutate()}>
-                  <Send /> {sessionId ? "Send follow-up" : "Start task"}
-                </button>
-              </div>
-            </div>
-          </div>
-        ) : <Notice>Your role can view this agent but not assign tasks.</Notice>}
-      </div>
-    </div>
-  );
-}
-
-function TaskResult({ t, onOpen }: { t: any; onOpen: () => void }) {
-  const detail = useQuery({ queryKey: ["task", t.id], queryFn: () => api.get(`/api/tasks/${t.id}`), enabled: ["completed", "failed", "timed_out", "cancelled"].includes(t.status) });
-  if (t.status === "queued") return <div className="faint small">Waiting for a worker…</div>;
-  if (t.status === "running") return <div className="row small muted"><span className="spinner" /> Working… <button className="btn xs ghost" onClick={onOpen}>watch live</button></div>;
-  if (t.status === "waiting_for_approval") return <div className="small"><Link to="/approvals" className="badge waiting_for_approval">Action awaiting human approval →</Link></div>;
-  if (t.error && t.status !== "completed") return <div className="error-text small">{t.error.message}</div>;
-  return <div className="md small">{detail.data?.result_summary || "…"}</div>;
-}
-
-// ------------------------------------------------------------------ live activity
-
-function ActivityTab({ a }: { a: any }) {
-  const initial = useQuery({ queryKey: ["agent-events", a.id], queryFn: () => api.get(`/api/agents/${a.id}/events?limit=200`) });
-  const [live, setLive] = useState<ActivityEvent[]>([]);
-  const [paused, setPaused] = useState(false);
-  useActivityStream((e) => !paused && setLive((l) => (l.some((x) => x.id === e.id) ? l : [...l, e].slice(-500))), { agentId: a.id });
-  const events = useMemo(() => {
-    const seen = new Set<number>();
-    return [...(initial.data ?? []), ...live].filter((e) => !seen.has(e.id) && seen.add(e.id)).reverse();
-  }, [initial.data, live]);
-  return (
-    <div className="card">
-      <div className="row between mb16">
-        <div className="row small muted"><span className={`status-dot ${paused ? "disabled" : "running"}`} /> {paused ? "Stream paused" : "Streaming live events"}</div>
-        <button className="btn sm" onClick={() => setPaused(!paused)}>{paused ? "Resume" : "Pause"}</button>
-      </div>
-      {initial.isLoading ? <Loading /> : <Timeline events={events} />}
-      <p className="faint tiny mt16">Shows tool calls, results, approvals, errors and outputs. Hidden model reasoning is never stored or displayed.</p>
-    </div>
-  );
-}
-
-// ------------------------------------------------------------------ history
-
-function HistoryTab({ a }: { a: any }) {
-  const nav = useNavigate();
-  const [status, setStatus] = useState("");
-  const [page, setPage] = useState(1);
-  const tasks = useQuery({ queryKey: ["tasks", { agent: a.id, status, page }], queryFn: () => api.get(`/api/tasks${qs({ agent_id: a.id, status, page, page_size: 25 })}`), refetchInterval: 8000 });
-  return (
-    <div className="card flush">
-      <div className="card-head">
-        <b>Task history</b>
-        <select value={status} onChange={(e) => { setStatus(e.target.value); setPage(1); }} style={{ width: 200 }} aria-label="Status filter">
-          <option value="">All statuses</option>
-          {["active", "queued", "running", "waiting_for_approval", "completed", "failed", "timed_out", "cancelled"].map((s) => <option key={s} value={s}>{s.replace(/_/g, " ")}</option>)}
-        </select>
-      </div>
-      <TaskTable items={tasks.data?.items ?? []} onOpen={(id) => nav(`/tasks/${id}`)} />
-      {tasks.data && <Pager page={page} pageSize={25} total={tasks.data.total} onPage={setPage} />}
-    </div>
-  );
-}
-
-export function TaskTable({ items, onOpen, showAgent }: { items: any[]; onOpen: (id: string) => void; showAgent?: boolean }) {
-  if (!items.length) return <Empty title="No tasks">Nothing matches this view.</Empty>;
-  return (
-    <div className="table-wrap">
-      <table className="table">
-        <thead><tr><th>Task</th>{showAgent && <th>Agent</th>}<th>Status</th><th>Started</th><th>Duration</th><th>Tokens</th><th>Est. cost</th><th>Attempt</th></tr></thead>
-        <tbody>
-          {items.map((t) => (
-            <tr key={t.id} className="click" onClick={() => onOpen(t.id)}>
-              <td style={{ maxWidth: 380 }}>
-                <div className="ellipsis strong small">{t.title}</div>
-                <div className="faint tiny mono">{t.id.slice(0, 12)}{t.parent_task_id ? " · delegated" : ""}{t.schedule_id ? " · scheduled" : ""}</div>
-              </td>
-              {showAgent && <td className="small nowrap">{t.agent_name}</td>}
-              <td><StatusBadge status={t.status} /></td>
-              <td className="faint small nowrap">{dateTime(t.started_at)}</td>
-              <td className="small">{duration(t.duration_s)}</td>
-              <td className="small">{t.usage?.prompt_tokens != null ? num((t.usage.prompt_tokens ?? 0) + (t.usage.completion_tokens ?? 0)) : "—"}</td>
-              <td className="small">{t.usage?.cost_usd != null ? usd(t.usage.cost_usd) : "—"}</td>
-              <td className="small">{t.attempt + 1}/{t.max_retries + 1}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-// ------------------------------------------------------------------ files
-
-function FilesTab({ a }: { a: any }) {
-  const sessions = useQuery({ queryKey: ["sessions", a.id], queryFn: () => api.get(`/api/sessions?agent_id=${a.id}&page_size=50`) });
-  const [sid, setSid] = useState("");
-  const list = sessions.data?.items ?? [];
-  const active = sid || list[0]?.id;
-  if (sessions.isLoading) return <Loading />;
-  if (!list.length) return <div className="card"><Empty title="No workspaces yet">Each execution session gets an isolated workspace. Files appear after the first task.</Empty></div>;
-  return (
-    <div className="card flush">
-      <div className="card-head">
-        <b>Workspace files</b>
-        <select value={active} onChange={(e) => setSid(e.target.value)} style={{ width: 360 }} aria-label="Session">
-          {list.map((s: any) => <option key={s.id} value={s.id}>{s.title || s.id} — {timeAgo(s.last_active_at)}</option>)}
-        </select>
-      </div>
-      {active && <FilesBrowser sessionId={active} />}
-    </div>
-  );
-}
-
-// ------------------------------------------------------------------ settings
-
-function SettingsTab({ a }: { a: any }) {
-  const { can } = useSession();
-  const qc = useQueryClient();
-  const toast = useToast();
-  const [identity, setIdentity] = useState<Identity>({ name: a.name, description: a.description, category: a.category, avatar: a.avatar, team_id: a.team_id, tags: a.tags });
-  const [config, setConfig] = useState<Config>(a.config);
-  const [note, setNote] = useState("");
-  const [section, setSection] = useState("identity");
-  const versions = useQuery({ queryKey: ["versions", a.id], queryFn: () => api.get(`/api/agents/${a.id}/versions`) });
-  const save = useMutation({
-    mutationFn: () => api.put(`/api/agents/${a.id}`, { identity, config, change_note: note }),
-    onSuccess: (r) => { qc.invalidateQueries({ queryKey: ["agents"] }); qc.invalidateQueries({ queryKey: ["versions", a.id] }); setNote(""); toast("ok", `Saved — now version ${r.current_version}. Applies to new tasks.`); },
-    onError: (e: any) => toast("error", e.message),
-  });
-  const editable = can("agents:write");
-  const sections: [string, string][] = [["identity", "Identity"], ["role", "Role & instructions"], ["model", "Model"], ["tools", "Tools & integrations"], ["knowledge", "Knowledge"], ["policy", "Policies"], ["versions", "Version history"]];
-  return (
-    <div className="wizard">
-      <div className="card" style={{ padding: 10 }}>
-        <div className="steps">
-          {sections.map(([k, l]) => <button key={k} className={`step ${section === k ? "on" : ""}`} onClick={() => setSection(k)}>{l}</button>)}
-        </div>
-      </div>
-      <div className="card">
-        {!editable && <div className="mb16"><Notice>Read-only: your role cannot change agent configuration.</Notice></div>}
-        <fieldset disabled={!editable} style={{ border: 0, padding: 0, margin: 0 }}>
-          {section === "identity" && <IdentitySection value={identity} onChange={setIdentity} />}
-          {section === "role" && <RoleSection value={config} onChange={setConfig} />}
-          {section === "model" && <ModelSection value={config} onChange={setConfig} />}
-          {section === "tools" && <ToolsSection value={config} onChange={setConfig} />}
-          {section === "knowledge" && <KnowledgeSection value={config} onChange={setConfig} />}
-          {section === "policy" && <PolicySection value={config} onChange={setConfig} agentId={a.id} />}
-        </fieldset>
-        {section === "versions" && (
-          <table className="table">
-            <thead><tr><th>Version</th><th>Change note</th><th>Created</th><th>Model</th><th>Tools</th></tr></thead>
-            <tbody>{(versions.data ?? []).map((v: any) => (
-              <tr key={v.version}><td>v{v.version}{v.version === a.current_version && <span className="badge accent" style={{ marginLeft: 6 }}>current</span>}</td>
-                <td className="small">{v.change_note || "—"}</td><td className="faint small">{dateTime(v.created_at)}</td><td className="small">{v.config.model.model}</td><td className="small">{v.config.tools.join(", ")}</td></tr>
-            ))}</tbody>
-          </table>
-        )}
-        {editable && section !== "versions" && (
-          <div className="row mt24" style={{ borderTop: "1px solid var(--border)", paddingTop: 16 }}>
-            <input placeholder="Change note (optional)" value={note} onChange={(e) => setNote(e.target.value)} maxLength={300} />
-            <button className="btn primary" disabled={save.isPending} onClick={() => save.mutate()}>Save changes</button>
-          </div>
-        )}
-        {editable && <p className="faint tiny">Saving creates a new immutable version. Running tasks keep the version they started with.</p>}
-      </div>
-    </div>
-  );
-}
-
-// ------------------------------------------------------------------ logs
-
-function LogsTab({ a }: { a: any }) {
-  const [type, setType] = useState("");
-  const events = useQuery({ queryKey: ["agent-events", a.id, "logs"], queryFn: () => api.get(`/api/agents/${a.id}/events?limit=500`), refetchInterval: 10000 });
-  const tasks = useQuery({ queryKey: ["tasks", { agent: a.id, logs: true }], queryFn: () => api.get(`/api/tasks?agent_id=${a.id}&page_size=200`) });
-  const trace: Record<string, string> = Object.fromEntries((tasks.data?.items ?? []).map((t: any) => [t.id, t.trace_id]));
-  const rows = (events.data ?? []).filter((e: any) => !type || e.type === type).slice().reverse();
-  const types = Array.from(new Set((events.data ?? []).map((e: any) => e.type))) as string[];
-  return (
-    <div className="card flush">
-      <div className="card-head">
-        <b>Structured execution log</b>
-        <select value={type} onChange={(e) => setType(e.target.value)} style={{ width: 200 }} aria-label="Event type">
-          <option value="">All event types</option>
-          {types.map((t) => <option key={t}>{t}</option>)}
-        </select>
-      </div>
-      <div className="table-wrap" style={{ maxHeight: 640 }}>
-        <table className="table">
-          <thead><tr><th>Time</th><th>Type</th><th>Task / trace</th><th>Summary</th></tr></thead>
-          <tbody>
-            {rows.map((e: any) => (
-              <tr key={e.id}>
-                <td className="mono tiny nowrap">{new Date(e.ts).toISOString().replace("T", " ").slice(0, 19)}</td>
-                <td><span className="badge outline">{e.type}</span></td>
-                <td className="mono tiny"><Link to={`/tasks/${e.task_id}`}>{e.task_id.slice(0, 10)}</Link><div className="faint">{trace[e.task_id]?.slice(0, 10) ?? ""}</div></td>
-                <td className="small" style={{ maxWidth: 640, wordBreak: "break-word" }}>{e.summary}{e.data?.tool ? <span className="faint"> · {e.data.tool}</span> : null}</td>
-              </tr>
+      )}
+      {taskId && tab === "details" && t && (
+        <>
+          <section className="ctx-section">
+            <h3>Task <Link className="disclose" to={`/tasks/${t.id}`}>Open</Link></h3>
+            <KV items={[
+              ["Status", <Status key="s" status={t.status} />],
+              ["Started", t.started_at ? fullDateTime(t.started_at) : "—"],
+              ["Duration", t.duration_s != null ? duration(t.duration_s) : t.started_at && t.status === "running" ? `${duration(elapsedSince(t.started_at))} so far` : "—"],
+              ["Attempt", `${t.attempt + 1} of ${t.max_retries + 1}`],
+              ["Requested by", t.requested_by_name ?? "—"],
+              ["Task ID", <CopyId key="id" id={t.id} />],
+              ["Trace ID", <span key="tr" className="mono">{shortId(t.trace_id)}</span>],
+            ]} />
+          </section>
+          <section className="ctx-section">
+            <h3>Usage</h3>
+            <KV items={[
+              ["Model", <span key="m" className="mono">{t.usage?.model ?? agent.config.model.model}</span>],
+              ["Tokens", t.usage?.prompt_tokens != null ? `${num(t.usage.prompt_tokens)} in · ${num(t.usage.completion_tokens)} out` : "—"],
+              ["Requests", num(t.usage?.requests)],
+              ["Tool calls", num(t.usage?.tool_calls)],
+              ["Est. cost", t.usage?.cost_usd != null ? <span key="c">{usd(t.usage.cost_usd)} <span className="tiny muted">estimate</span></span> : "Not available"],
+            ]} />
+          </section>
+          <section className="ctx-section">
+            <h3>Generated files</h3>
+            {(artifacts.data ?? []).length === 0 ? <p className="small muted" style={{ margin: 0 }}>None yet.</p> : artifacts.data.map((f: any) => (
+              <Link key={f.id} className="file-link" to={`/tasks/${t.id}?tab=artifacts&file=${encodeURIComponent(f.path)}`}><FileText aria-hidden /><span className="grow ellipsis mono">{f.path}</span><span className="tiny muted">{bytes(f.size)}</span></Link>
             ))}
-          </tbody>
-        </table>
-      </div>
-      <div className="pager">Credentials are redacted before events are stored. Correlate with server logs using the trace id.</div>
-    </div>
+          </section>
+          {(t.approvals ?? []).length > 0 && (
+            <section className="ctx-section">
+              <h3>Approvals</h3>
+              {t.approvals.map((x: any) => <div key={x.id} className="row small" style={{ padding: "3px 0" }}><Status status={x.status} quiet /><span className="grow ellipsis" title={x.summary}>{x.summary}</span></div>)}
+            </section>
+          )}
+          {uniqRefs.length > 0 && (
+            <section className="ctx-section">
+              <h3>Knowledge references</h3>
+              {uniqRefs.map((r) => <div key={`${r.source}/${r.document}`} className="small ellipsis" style={{ padding: "2px 0" }}>{r.source} / <span className="mono">{r.document}</span></div>)}
+            </section>
+          )}
+          <section className="ctx-section">
+            <h3>Agent <Link className="disclose" to={`/agents/${agent.id}/settings`}>Configure</Link></h3>
+            <KV items={[
+              ["Version", `v${t.agent_version}${t.agent_version !== agent.current_version ? ` (current v${agent.current_version})` : ""}`],
+              ["Approvals", agent.config.policy.approval_mode],
+              ["Tools", <div key="t" className="row wrap" style={{ gap: 4 }}>{agent.config.tools.map((x: string) => <Tag key={x} tone={["execute", "external", "write"].includes(TOOL_ACCESS[x]) ? "warning" : ""} title={`${TOOL_ACCESS[x] ?? "tool"} access`}>{x}</Tag>)}</div>],
+              ["Knowledge", `${agent.config.knowledge_sources.length} source(s)`],
+              ["Integrations", `${agent.config.integrations.length}`],
+            ]} />
+          </section>
+        </>
+      )}
+    </aside>
   );
 }
+
+function CopyId({ id }: { id: string }) {
+  const toast = useToast();
+  return (
+    <button className="disclose mono" onClick={() => navigator.clipboard?.writeText(id).then(() => toast("ok", "Task ID copied"))} aria-label="Copy task ID">
+      {shortId(id)} <Copy size={11} />
+    </button>
+  );
+}
+

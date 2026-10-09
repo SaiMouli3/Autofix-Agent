@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import mimetypes
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -44,8 +45,38 @@ class TaskIn(BaseModel):
     session_id: str | None = None
 
 
+PROVIDER_ERRORS = {"auth_failed", "rate_limited", "provider_unavailable", "network_error", "timeout_provider",
+                   "missing_credential", "provider_missing", "unknown_model", "no_tool_calling", "malformed_response"}
+INFRA_ERRORS = {"worker_lost", "sandbox_lost", "RuntimeError", "OperationalError"}
+
+
+def error_category(error: dict[str, Any] | None, status: str) -> str | None:
+    """Classify a failure for operators: provider, tool, timeout, permission, cancelled, limit,
+    infrastructure or runtime. Derived from the stored error code only."""
+    if status == "cancelled":
+        return "cancelled"
+    if not error or status not in ("failed", "timed_out", "queued"):
+        return None
+    code = str(error.get("code", ""))
+    low = (code + " " + str(error.get("message", ""))).lower()
+    if status == "timed_out" or code == "timeout":
+        return "timeout"
+    if code in ("budget_exceeded", "tool_limit_exceeded", "MaxIterationsReached"):
+        return "limit"
+    if code in PROVIDER_ERRORS or code.startswith("LLM") or "litellm" in low or "apierror" in low or "ratelimit" in low:
+        return "provider"
+    if code in ("agent_unavailable",) or "permission" in low or "denied" in low:
+        return "permission"
+    if code in INFRA_ERRORS:
+        return "infrastructure"
+    if "tool" in low:
+        return "tool"
+    return "runtime"
+
+
 def task_out(db: Session, t: Task, detail: bool = False) -> dict[str, Any]:
     agent = db.get(Agent, t.agent_id)
+    requester = db.get(User, t.requested_by) if t.requested_by else None
     out = {
         "id": t.id, "agent_id": t.agent_id, "agent_name": agent.name if agent else "", "agent_version": t.agent_version,
         "title": t.title, "status": t.status, "priority": t.priority, "attempt": t.attempt, "max_retries": t.max_retries,
@@ -55,12 +86,12 @@ def task_out(db: Session, t: Task, detail: bool = False) -> dict[str, Any]:
         "delegation_depth": t.delegation_depth, "schedule_id": t.schedule_id, "trace_id": t.trace_id,
         "usage": t.usage or {}, "requested_by": t.requested_by, "requested_by_agent_id": t.requested_by_agent_id,
         "cancel_requested": t.cancel_requested, "scheduled_for": t.scheduled_for,
+        "requested_by_name": requester.name if requester else None,
+        "error_category": error_category(t.error, t.status),
     }
     if detail:
         out["instructions"] = t.instructions
         out["result_summary"] = t.result_summary
-        user = db.get(User, t.requested_by) if t.requested_by else None
-        out["requested_by_name"] = user.name if user else None
         out["children"] = [
             {"delegation_id": d.id, "child_task_id": d.child_task_id, "to_agent_id": d.to_agent_id,
              "objective": d.objective, "status": d.status, "depth": d.depth}
@@ -94,8 +125,16 @@ def create_task(agent_id: str, body: TaskIn, p: Principal = Depends(require("tas
     return out
 
 
+TASK_SORTS = {
+    "created": Task.created_at, "started": Task.started_at, "finished": Task.finished_at,
+    "priority": Task.priority, "status": Task.status, "title": Task.title,
+}
+
+
 @router.get("/tasks")
 def list_tasks(agent_id: str = "", status: str = "", q: str = "", session_id: str = "", top_level: bool = False,
+               created_after: datetime | None = None, created_before: datetime | None = None,
+               requested_by: str = "", sort: str = "created", order: str = "desc",
                page: int = Query(1, ge=1), page_size: int = Query(50, ge=1, le=200),
                p: Principal = Depends(require("tasks:read")), db: Session = Depends(get_db)):
     stmt = select(Task).where(Task.org_id == p.org_id)
@@ -104,15 +143,26 @@ def list_tasks(agent_id: str = "", status: str = "", q: str = "", session_id: st
     if status == "active":
         stmt = stmt.where(Task.status.in_(TASK_ACTIVE_STATES))
     elif status:
-        stmt = stmt.where(Task.status == status)
+        stmt = stmt.where(Task.status.in_([s.strip() for s in status.split(",") if s.strip()]))
     if session_id:
         stmt = stmt.where(Task.session_id == session_id)
     if q:
         stmt = stmt.where(Task.title.ilike(f"%{q}%") | Task.instructions.ilike(f"%{q}%"))
     if top_level:
         stmt = stmt.where(Task.parent_task_id.is_(None))
+    if created_after:
+        stmt = stmt.where(Task.created_at >= created_after)
+    if created_before:
+        stmt = stmt.where(Task.created_at <= created_before)
+    if requested_by:
+        stmt = stmt.where(Task.requested_by == (p.user_id if requested_by == "me" else requested_by))
+    if sort not in TASK_SORTS:
+        raise HTTPException(422, f"sort must be one of {sorted(TASK_SORTS)}")
+    col = TASK_SORTS[sort]
+    ordering = col.asc() if order == "asc" else col.desc()
     total = db.execute(select(func.count()).select_from(stmt.subquery())).scalar_one()
-    rows = db.execute(stmt.order_by(Task.created_at.desc()).offset((page - 1) * page_size).limit(page_size)).scalars()
+    rows = db.execute(stmt.order_by(ordering, Task.created_at.desc())
+                      .offset((page - 1) * page_size).limit(page_size)).scalars()
     return {"items": [task_out(db, t) for t in rows], "total": total, "page": page, "page_size": page_size}
 
 

@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from sca.api.deps import Principal, require, scoped
 from sca.config import get_settings
 from sca.db import get_db
-from sca.models import Agent, AgentVersion, Document, DocumentChunk, IngestionJob, KnowledgeSource
+from sca.models import Agent, AgentVersion, Document, DocumentChunk, IngestionJob, KnowledgeSource, User
 from sca.services import audit, knowledge
 
 router = APIRouter(prefix="/api/knowledge", tags=["knowledge"])
@@ -51,10 +51,17 @@ def _source_out(db: Session, s: KnowledgeSource) -> dict:
             "document_count": sum(docs.values()), "chunk_count": chunks, "agents": agents}
 
 
-def _doc_out(d: Document) -> dict:
-    return {"id": d.id, "source_id": d.source_id, "filename": d.filename, "mime": d.mime, "size": d.size,
-            "sha256": d.sha256, "status": d.status, "error": d.error, "chunk_count": d.chunk_count,
-            "embedded": d.embedded, "created_at": d.created_at, "indexed_at": d.indexed_at}
+def _doc_out(d: Document, db: Session | None = None) -> dict:
+    out = {"id": d.id, "source_id": d.source_id, "filename": d.filename, "mime": d.mime, "size": d.size,
+           "sha256": d.sha256, "status": d.status, "error": d.error, "chunk_count": d.chunk_count,
+           "embedded": d.embedded, "created_at": d.created_at, "indexed_at": d.indexed_at,
+           "type": (Path(d.filename).suffix.lstrip(".") or "file").lower()}
+    if db is not None:
+        u = db.get(User, d.uploaded_by)
+        src = db.get(KnowledgeSource, d.source_id)
+        out["uploaded_by_name"] = u.name if u else None
+        out["source_name"] = src.name if src else None
+    return out
 
 
 @router.get("/sources")
@@ -92,7 +99,34 @@ def delete_source(source_id: str, p: Principal = Depends(require("knowledge:writ
 def list_documents(source_id: str, p: Principal = Depends(require("knowledge:read")), db: Session = Depends(get_db)):
     scoped(db, KnowledgeSource, source_id, p, "knowledge source")
     rows = db.execute(select(Document).where(Document.source_id == source_id).order_by(Document.created_at.desc())).scalars()
-    return [_doc_out(d) for d in rows]
+    return [_doc_out(d, db) for d in rows]
+
+
+@router.get("/documents")
+def all_documents(q: str = "", status: str = "", source_id: str = "", page: int = 1, page_size: int = 50,
+                  p: Principal = Depends(require("knowledge:read")), db: Session = Depends(get_db)):
+    stmt = select(Document).where(Document.org_id == p.org_id)
+    if q:
+        stmt = stmt.where(Document.filename.ilike(f"%{q}%"))
+    if status:
+        stmt = stmt.where(Document.status == status)
+    if source_id:
+        stmt = stmt.where(Document.source_id == source_id)
+    page_size = max(1, min(page_size, 200))
+    total = db.execute(select(func.count()).select_from(stmt.subquery())).scalar_one()
+    rows = db.execute(stmt.order_by(Document.created_at.desc()).offset((max(page, 1) - 1) * page_size)
+                      .limit(page_size)).scalars()
+    return {"items": [_doc_out(d, db) for d in rows], "total": total}
+
+
+@router.get("/documents/{document_id}/preview")
+def preview(document_id: str, p: Principal = Depends(require("knowledge:read")), db: Session = Depends(get_db)):
+    """Extracted, indexed text (the exact passages agents can retrieve)."""
+    d = scoped(db, Document, document_id, p, "document")
+    chunks = db.execute(select(DocumentChunk).where(DocumentChunk.document_id == d.id)
+                        .order_by(DocumentChunk.ordinal).limit(8)).scalars().all()
+    return {"document": _doc_out(d, db), "passages": [{"ordinal": c.ordinal, "text": c.text} for c in chunks],
+            "truncated": d.chunk_count > len(chunks)}
 
 
 def _register(db: Session, p: Principal, s: KnowledgeSource, filename: str, data: bytes, mime: str) -> Document:

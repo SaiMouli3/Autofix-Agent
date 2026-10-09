@@ -56,6 +56,10 @@ jobs:
         run: "! grep -rEl '(xpl|sk)[-_][A-Za-z0-9]{24,}' dist/"
       - name: npm audit (production dependencies)
         run: npm audit --omit=dev --audit-level=high
+      - name: Mocked UI-state tests (no backend; fixtures only)
+        run: |
+          npx playwright install --with-deps chromium
+          npx playwright test ui-states.mocked
 
   image:
     runs-on: ubuntu-latest

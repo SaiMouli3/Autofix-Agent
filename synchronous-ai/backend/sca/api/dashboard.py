@@ -133,14 +133,21 @@ def monitoring(days: int = Query(14, ge=1, le=90), p: Principal = Depends(requir
     def pct(q: float):
         return round(secs[min(len(secs) - 1, int(q * len(secs)))], 1) if secs else None
 
-    errors = db.execute(select(TaskEvent.summary, TaskEvent.ts, Agent.name).join(Agent, Agent.id == TaskEvent.agent_id)
-                        .where(TaskEvent.org_id == org, TaskEvent.type.in_(("error", "tool_error")))
-                        .order_by(TaskEvent.id.desc()).limit(20)).all()
+    from sca.api.tasks import error_category
+
+    errors = db.execute(select(TaskEvent.summary, TaskEvent.ts, Agent.name, TaskEvent.task_id, TaskEvent.type)
+                        .join(Agent, Agent.id == TaskEvent.agent_id)
+                        .where(TaskEvent.org_id == org, TaskEvent.type.in_(("error", "tool_error")), TaskEvent.ts >= since)
+                        .order_by(TaskEvent.id.desc()).limit(25)).all()
     error_codes: dict[str, int] = {}
-    for t in db.execute(select(Task.error).where(Task.org_id == org, Task.error.is_not(None),
-                                                 Task.created_at >= since)).scalars():
-        code = (t or {}).get("code", "unknown")
+    error_categories: dict[str, int] = {}
+    for err, st in db.execute(select(Task.error, Task.status).where(Task.org_id == org, Task.error.is_not(None),
+                                                                   Task.created_at >= since)).all():
+        code = (err or {}).get("code", "unknown")
         error_codes[code] = error_codes.get(code, 0) + 1
+        cat = error_category(err, st)
+        if cat:
+            error_categories[cat] = error_categories.get(cat, 0) + 1
     proc = psutil.Process()
     with proc.oneshot():
         mem = proc.memory_info().rss
@@ -163,7 +170,8 @@ def monitoring(days: int = Query(14, ge=1, le=90), p: Principal = Depends(requir
         "daily_tasks": sorted(task_daily.values(), key=lambda x: x["date"]),
         "durations": {"count": len(secs), "p50_s": pct(0.5), "p90_s": pct(0.9), "max_s": secs[-1] if secs else None},
         "error_codes": error_codes,
-        "recent_errors": [{"summary": s, "ts": ts, "agent": n} for s, ts, n in errors],
+        "error_categories": error_categories,
+        "recent_errors": [{"summary": s, "ts": ts, "agent": n, "task_id": tid, "type": ty} for s, ts, n, tid, ty in errors],
         "queue": {**queue, "oldest_queued_at": oldest_queued},
         "workers": get_orchestrator().health(),
         "resources": {"process_rss_mb": round(mem / 1e6, 1), "process_cpu_percent": cpu, "threads": threads,

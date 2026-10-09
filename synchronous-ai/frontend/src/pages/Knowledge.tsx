@@ -1,161 +1,229 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { FilePlus2, Library, Plus, RefreshCw, Search, Trash2, Upload } from "lucide-react";
+import { Eye, FilePlus2, Library, Plus, RefreshCw, Search, Trash2, Upload } from "lucide-react";
 import { useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { Shell } from "../components/Shell";
-import { Empty, ErrorBox, Loading, Modal, Notice, StatusBadge, Tabs, useToast } from "../components/ui";
-import { api } from "../lib/api";
-import { bytes, timeAgo } from "../lib/format";
+import { Alert, Dialog, Empty, ErrorState, InlineError, Menu, Pager, SearchField, SkeletonRows, Status, Tag, useConfirm, useToast } from "../components/ui";
+import { api, qs } from "../lib/api";
+import { bytes, dateTime, fullDateTime } from "../lib/format";
+import { useDebounced } from "../lib/prefs";
 import { useSession } from "../lib/session";
+
+const ACCEPT = ".txt,.md,.markdown,.csv,.json,.html,.htm,.pdf,.docx,.yaml,.yml,.log";
+const DOC_STATUS: Record<string, string> = { pending: "pending_doc", processing: "processing", indexed: "indexed", failed: "failed" };
+const PAGE = 25;
 
 export default function Knowledge() {
   const { can } = useSession();
-  const sources = useQuery({ queryKey: ["knowledge-sources"], queryFn: () => api.get("/api/knowledge/sources"), refetchInterval: 8000 });
-  const [sel, setSel] = useState("");
-  const [modal, setModal] = useState(false);
-  const list = sources.data ?? [];
-  const current = list.find((s: any) => s.id === sel) ?? list[0];
-  return (
-    <Shell title="Company Knowledge">
-      <div className="page-head">
-        <div><h1>Company knowledge</h1><p>Upload policies, SOPs, manuals and documentation. Content is extracted, chunked and indexed for retrieval; agents only search sources assigned to them and must cite references.</p></div>
-        {can("knowledge:write") && <button className="btn primary" onClick={() => setModal(true)}><Plus /> New source</button>}
-      </div>
-      <ErrorBox error={sources.error} />
-      {sources.isLoading && <Loading />}
-      {sources.data && list.length === 0 && <div className="card"><Empty icon={Library} title="No knowledge sources" action={can("knowledge:write") ? <button className="btn primary" onClick={() => setModal(true)}><Plus /> Create a source</button> : undefined}>Group documents into sources (e.g. “HR Policies”, “Product Manuals”) and assign them to agents.</Empty></div>}
-      {list.length > 0 && (
-        <div className="grid" style={{ gridTemplateColumns: "300px minmax(0,1fr)", alignItems: "start" }}>
-          <div className="stack" style={{ gap: 8 }}>
-            {list.map((s: any) => (
-              <button key={s.id} className={`template ${current?.id === s.id ? "on" : ""}`} onClick={() => setSel(s.id)}>
-                <Library size={18} />
-                <span className="grow"><b className="small">{s.name}</b><div className="faint tiny">{s.category}{s.department ? ` · ${s.department}` : ""} · {s.document_count} docs · {s.agents.length} agents</div></span>
-              </button>
-            ))}
-          </div>
-          {current && <SourceDetail key={current.id} s={current} />}
-        </div>
-      )}
-      {modal && <NewSource onClose={() => setModal(false)} onCreated={(id) => { setSel(id); setModal(false); }} />}
-    </Shell>
-  );
-}
-
-function SourceDetail({ s }: { s: any }) {
-  const { can } = useSession();
   const qc = useQueryClient();
   const toast = useToast();
-  const [tab, setTab] = useState<"docs" | "search" | "jobs">("docs");
-  const docs = useQuery({ queryKey: ["docs", s.id], queryFn: () => api.get(`/api/knowledge/sources/${s.id}/documents`), refetchInterval: (q) => ((q.state.data as any[])?.some((d) => ["pending", "processing"].includes(d.status)) ? 1500 : 10000) });
-  const jobs = useQuery({ queryKey: ["ingest-jobs"], queryFn: () => api.get("/api/knowledge/jobs"), enabled: tab === "jobs", refetchInterval: 4000 });
+  const confirm = useConfirm();
+  const [sp, setSp] = useSearchParams();
+  const source = sp.get("source") ?? "";
+  const status = sp.get("status") ?? "";
+  const page = Number(sp.get("page") ?? 1);
+  const [q, setQ] = useState("");
+  const dq = useDebounced(q, 250);
+  const [modal, setModal] = useState<"" | "source" | "text" | "search">("");
+  const [preview, setPreview] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
-  const [text, setText] = useState({ title: "", content: "" });
-  const [query, setQuery] = useState("");
-  const [hits, setHits] = useState<any[] | null>(null);
-  const refresh = () => { qc.invalidateQueries({ queryKey: ["docs", s.id] }); qc.invalidateQueries({ queryKey: ["knowledge-sources"] }); };
+  const set = (patch: Record<string, string>) => { const n = new URLSearchParams(sp); Object.entries(patch).forEach(([k, v]) => (v ? n.set(k, v) : n.delete(k))); if (!("page" in patch)) n.delete("page"); setSp(n, { replace: true }); };
+  const sources = useQuery({ queryKey: ["knowledge-sources"], queryFn: ({ signal }) => api.get("/api/knowledge/sources", signal), refetchInterval: 15000 });
+  const params = { q: dq, status, source_id: source, page, page_size: PAGE };
+  const docs = useQuery({
+    queryKey: ["documents", params], queryFn: ({ signal }) => api.get(`/api/knowledge/documents${qs(params)}`, signal), placeholderData: (p) => p,
+    refetchInterval: (qq) => ((qq.state.data as any)?.items?.some((d: any) => ["pending", "processing"].includes(d.status)) ? 2000 : 15000),
+  });
+  const current = (sources.data ?? []).find((s: any) => s.id === source);
+  const refresh = () => { qc.invalidateQueries({ queryKey: ["documents"] }); qc.invalidateQueries({ queryKey: ["knowledge-sources"] }); };
   const upload = useMutation({
     mutationFn: async (files: FileList) => {
+      const results = [];
       for (const f of Array.from(files)) {
         const fd = new FormData();
         fd.append("file", f);
-        await api.upload(`/api/knowledge/sources/${s.id}/documents`, fd);
+        try { await api.upload(`/api/knowledge/sources/${source}/documents`, fd); results.push({ ok: true, name: f.name }); }
+        catch (e: any) { results.push({ ok: false, name: f.name, error: e.message }); }
       }
+      return results;
     },
-    onSuccess: () => { refresh(); toast("ok", "Uploaded — indexing in progress"); },
-    onError: (e: any) => toast("error", e.message),
+    onSuccess: (r) => {
+      refresh();
+      const failed = r.filter((x) => !x.ok);
+      toast(failed.length ? "error" : "ok", failed.length ? `${failed.length} file(s) rejected: ${failed.map((x) => `${x.name} (${x.error})`).join("; ")}` : `${r.length} file(s) uploaded. Indexing has started.`);
+    },
   });
-  const addText = useMutation({ mutationFn: () => api.post(`/api/knowledge/sources/${s.id}/text`, text), onSuccess: () => { setText({ title: "", content: "" }); refresh(); toast("ok", "Added — indexing in progress"); }, onError: (e: any) => toast("error", e.message) });
-  const del = useMutation({ mutationFn: (id: string) => api.del(`/api/knowledge/documents/${id}`), onSuccess: () => { refresh(); toast("ok", "Document and its index deleted"); } });
-  const reindex = useMutation({ mutationFn: (id: string) => api.post(`/api/knowledge/documents/${id}/reindex`), onSuccess: refresh });
-  const delSource = useMutation({ mutationFn: () => api.del(`/api/knowledge/sources/${s.id}`), onSuccess: () => { qc.invalidateQueries({ queryKey: ["knowledge-sources"] }); toast("ok", "Source deleted"); } });
-  const search = useMutation({ mutationFn: () => api.post("/api/knowledge/search", { query, source_ids: [s.id], top_k: 6 }), onSuccess: setHits, onError: (e: any) => toast("error", e.message) });
+  const del = useMutation({ mutationFn: (id: string) => api.del(`/api/knowledge/documents/${id}`), onSuccess: () => { refresh(); toast("ok", "Document, passages and embeddings deleted"); }, onError: (e: any) => toast("error", e.message) });
+  const reindex = useMutation({ mutationFn: (id: string) => api.post(`/api/knowledge/documents/${id}/reindex`), onSuccess: () => { refresh(); toast("ok", "Re-indexing started"); }, onError: (e: any) => toast("error", e.message) });
+  const delSource = useMutation({ mutationFn: () => api.del(`/api/knowledge/sources/${source}`), onSuccess: () => { set({ source: "" }); refresh(); toast("ok", "Collection deleted"); }, onError: (e: any) => toast("error", e.message) });
+  const items: any[] = docs.data?.items ?? [];
+
   return (
-    <div className="card">
-      <div className="row between">
-        <div><h2 style={{ margin: 0, fontSize: 18 }}>{s.name}</h2><div className="faint small">{s.description || "No description."} · used by {s.agents.map((a: any) => a.name).join(", ") || "no agents"}</div></div>
-        {can("knowledge:write") && (
-          <div className="row">
-            <input ref={fileRef} type="file" multiple hidden accept=".txt,.md,.markdown,.csv,.json,.html,.htm,.pdf,.docx,.yaml,.yml,.log" onChange={(e) => e.target.files?.length && upload.mutate(e.target.files)} />
-            <button className="btn primary sm" onClick={() => fileRef.current?.click()} disabled={upload.isPending}><Upload /> {upload.isPending ? "Uploading…" : "Upload files"}</button>
-            <button className="btn ghost sm" onClick={() => confirm("Delete this source, its documents and index?") && delSource.mutate()}><Trash2 /></button>
-          </div>
-        )}
+    <Shell crumbs={[{ label: "Knowledge" }]}>
+      <div className="page-head">
+        <div><h1>Company knowledge</h1><p>Documents are extracted, split into passages and indexed. Agents search only the collections assigned to them and cite what they use.</p></div>
+        <div className="row">
+          <button className="btn" onClick={() => setModal("search")} disabled={!sources.data?.length}><Search /> Test retrieval</button>
+          {can("knowledge:write") && <button className="btn" onClick={() => setModal("source")}><Plus /> New collection</button>}
+          {can("knowledge:write") && (
+            <>
+              <input ref={fileRef} type="file" multiple hidden accept={ACCEPT} onChange={(e) => { if (e.target.files?.length) upload.mutate(e.target.files); e.target.value = ""; }} />
+              <Menu label="Add documents" trigger={(p) => <button {...p} className="btn primary" disabled={!sources.data?.length}><Upload /> Add documents</button>} items={
+                current
+                  ? [{ label: `Upload files to ${current.name}`, icon: Upload, onSelect: () => fileRef.current?.click() }, { label: `Write a text document in ${current.name}`, icon: FilePlus2, onSelect: () => setModal("text") }]
+                  : [{ label: "Select a collection first", disabled: true }, ...(sources.data ?? []).map((s: any) => ({ label: s.name, onSelect: () => set({ source: s.id }) }))]
+              } />
+            </>
+          )}
+        </div>
       </div>
-      <div className="mt16"><Tabs value={tab} onChange={setTab} tabs={[{ key: "docs", label: "Documents", count: docs.data?.length }, { key: "search", label: "Retrieval preview" }, { key: "jobs", label: "Ingestion jobs" }]} /></div>
-      {tab === "docs" && (
-        <>
-          {docs.data?.length === 0 && <Empty icon={FilePlus2} title="No documents">PDF, DOCX, Markdown, text, HTML, CSV, JSON and YAML are supported (scanned PDFs need OCR first).</Empty>}
-          {(docs.data?.length ?? 0) > 0 && (
+      {upload.isPending && <div style={{ marginBottom: 12 }}><Alert kind="info">Uploading… indexing starts as soon as each file arrives.</Alert></div>}
+      <div className="filters" role="group" aria-label="Collection">
+        <button className="chip-btn" aria-pressed={!source} onClick={() => set({ source: "" })}>All collections</button>
+        {(sources.data ?? []).map((s: any) => (
+          <button key={s.id} className="chip-btn" aria-pressed={source === s.id} onClick={() => set({ source: s.id })}>{s.name} <span className="c">{s.document_count}</span></button>
+        ))}
+      </div>
+      {current && (
+        <div className="alert neutral" style={{ marginBottom: 12 }}>
+          <Library size={16} />
+          <div className="grow small"><b>{current.name}</b> · {current.category}{current.department ? ` · ${current.department}` : ""} · {current.chunk_count} indexed passages · used by {current.agents.map((a: any) => a.name).join(", ") || "no agents"}
+            {current.description && <div className="muted">{current.description}</div>}</div>
+          {can("knowledge:write") && <button className="btn xs danger" onClick={async () => {
+            if (await confirm({ title: `Delete collection “${current.name}”?`, body: `All ${current.document_count} documents, their passages and embeddings are deleted. Agents using it lose access. This cannot be undone.`, confirmLabel: "Delete collection", danger: true, requireText: current.name })) delSource.mutate();
+          }}><Trash2 /> Delete</button>}
+        </div>
+      )}
+      <div className="filters">
+        <SearchField value={q} onChange={(v) => { setQ(v); set({ page: "" }); }} placeholder="Search document names" label="Search documents" />
+        <select value={status} onChange={(e) => set({ status: e.target.value })} aria-label="Ingestion status">
+          <option value="">Any status</option><option value="pending">Uploaded</option><option value="processing">Processing</option><option value="indexed">Indexed</option><option value="failed">Failed</option>
+        </select>
+      </div>
+      <div className="panel">
+        {(docs.isLoading || sources.isLoading) && <SkeletonRows rows={6} />}
+        {docs.isError && <div className="panel-body"><ErrorState error={docs.error} onRetry={() => docs.refetch()} what="documents" /></div>}
+        {sources.data?.length === 0 && (
+          <Empty icon={Library} title="Create your first collection" action={can("knowledge:write") ? <button className="btn primary" onClick={() => setModal("source")}><Plus /> New collection</button> : undefined}>
+            Group documents into collections such as “HR policies” or “Product manuals”, then assign collections to agents.
+          </Empty>
+        )}
+        {sources.data && sources.data.length > 0 && docs.data && items.length === 0 && (
+          <Empty icon={FilePlus2} title={q || status ? "No documents match" : "No documents yet"}>
+            Supported: PDF (text-based), Word (.docx), Markdown, text, HTML, CSV, JSON, YAML. Scanned PDFs need OCR before upload.
+          </Empty>
+        )}
+        {items.length > 0 && (
+          <div className="table-wrap">
             <table className="table">
-              <thead><tr><th>Document</th><th>Status</th><th>Passages</th><th>Index</th><th>Size</th><th>Added</th><th /></tr></thead>
+              <thead><tr><th scope="col">Document</th><th scope="col">Status</th><th scope="col" className="hide-sm">Type</th><th scope="col" className="right hide-sm">Size</th><th scope="col" className="hide-sm">Collection</th><th scope="col" className="hide-sm">Owner</th><th scope="col">Uploaded</th><th scope="col"><span className="sr-only">Actions</span></th></tr></thead>
               <tbody>
-                {docs.data.map((d: any) => (
+                {items.map((d) => (
                   <tr key={d.id}>
-                    <td><b className="small">{d.filename}</b>{d.error && <div className="error-text tiny">{d.error}</div>}</td>
-                    <td><StatusBadge status={d.status} /></td>
-                    <td>{d.chunk_count}</td>
-                    <td className="small">{d.status === "indexed" ? (d.embedded ? "hybrid (semantic + lexical)" : "lexical") : "—"}</td>
-                    <td className="small">{bytes(d.size)}</td>
-                    <td className="faint small">{timeAgo(d.created_at)}</td>
-                    <td className="nowrap">{can("knowledge:write") && <>
-                      <button className="btn xs ghost" onClick={() => reindex.mutate(d.id)} title="Re-index"><RefreshCw /></button>
-                      <button className="btn xs ghost" onClick={() => confirm(`Delete ${d.filename}?`) && del.mutate(d.id)} title="Delete"><Trash2 /></button></>}</td>
+                    <td className="title-cell">
+                      <span className="strong ellipsis" style={{ display: "block" }}>{d.filename}</span>
+                      {d.status === "failed" ? <span className="tiny" style={{ color: "var(--danger)" }}>{d.error}</span>
+                        : d.status === "indexed" ? <span className="tiny muted">{d.chunk_count} passages · {d.embedded ? "semantic + keyword" : "keyword"} search</span> : null}
+                    </td>
+                    <td><Status status={DOC_STATUS[d.status] ?? d.status} /></td>
+                    <td className="hide-sm"><Tag mono>{d.type}</Tag></td>
+                    <td className="right num hide-sm">{bytes(d.size)}</td>
+                    <td className="hide-sm">{d.source_name}</td>
+                    <td className="hide-sm muted">{d.uploaded_by_name ?? "—"}</td>
+                    <td className="muted nowrap" title={fullDateTime(d.created_at)}>{dateTime(d.created_at)}</td>
+                    <td className="nowrap right">
+                      <button className="btn ghost icon sm" disabled={d.status !== "indexed"} onClick={() => setPreview(d.id)} aria-label={`Preview ${d.filename}`} data-tip="Preview passages"><Eye /></button>
+                      {can("knowledge:write") && <button className="btn ghost icon sm" onClick={() => reindex.mutate(d.id)} aria-label={`Re-index ${d.filename}`} data-tip="Re-index"><RefreshCw /></button>}
+                      {can("knowledge:write") && <button className="btn ghost icon sm" aria-label={`Delete ${d.filename}`} data-tip="Delete" onClick={async () => {
+                        if (await confirm({ title: `Delete ${d.filename}?`, body: "The file, its passages and embeddings are removed. Agents can no longer retrieve it.", confirmLabel: "Delete document", danger: true })) del.mutate(d.id);
+                      }}><Trash2 /></button>}
+                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
-          )}
-          {can("knowledge:write") && (
-            <div className="card mt16" style={{ background: "var(--surface-0)" }}>
-              <div className="card-title">Add text directly <span className="faint small">e.g. company profile, business rules</span></div>
-              <div className="stack">
-                <input placeholder="Title" value={text.title} onChange={(e) => setText({ ...text, title: e.target.value })} />
-                <textarea rows={5} placeholder="Content (Markdown supported)" value={text.content} onChange={(e) => setText({ ...text, content: e.target.value })} />
-                <div className="right"><button className="btn sm" disabled={!text.title || !text.content || addText.isPending} onClick={() => addText.mutate()}>Add to source</button></div>
-              </div>
-            </div>
-          )}
-        </>
-      )}
-      {tab === "search" && (
-        <div className="stack">
-          <div className="row">
-            <input placeholder="Ask what an agent would search for…" value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => e.key === "Enter" && query.length > 1 && search.mutate()} />
-            <button className="btn" disabled={query.length < 2} onClick={() => search.mutate()}><Search /> Search</button>
           </div>
-          {hits && hits.length === 0 && <Notice>No matching passages.</Notice>}
-          {hits?.map((h) => (
-            <div key={h.chunk_id} className="card" style={{ background: "var(--surface-0)", padding: 12 }}>
-              <div className="row between small"><b>{h.document} #chunk-{h.ordinal}</b><span className="faint">score {h.score} · {h.retrieval}</span></div>
-              <div className="md small muted mt8">{h.text.slice(0, 900)}</div>
-            </div>
+        )}
+        {docs.data && docs.data.total > PAGE && <Pager page={page} pageSize={PAGE} total={docs.data.total} onPage={(p) => set({ page: String(p) })} />}
+      </div>
+      {modal === "source" && <NewSource onClose={() => setModal("")} onCreated={(id) => { setModal(""); set({ source: id }); }} />}
+      {modal === "text" && current && <TextDoc source={current} onClose={() => setModal("")} onDone={() => { setModal(""); refresh(); }} />}
+      {modal === "search" && <RetrievalTest sources={sources.data ?? []} initial={source} onClose={() => setModal("")} />}
+      {preview && <Preview id={preview} onClose={() => setPreview(null)} />}
+    </Shell>
+  );
+}
+
+function Preview({ id, onClose }: { id: string; onClose: () => void }) {
+  const q = useQuery({ queryKey: ["doc-preview", id], queryFn: ({ signal }) => api.get(`/api/knowledge/documents/${id}/preview`, signal) });
+  return (
+    <Dialog size="wide" title={q.data?.document.filename ?? "Preview"} description="The extracted passages exactly as agents retrieve them." onClose={onClose}>
+      {q.isLoading && <SkeletonRows rows={5} />}
+      <ErrorState error={q.error} what="the preview" />
+      {q.data && (
+        <div className="stack">
+          {q.data.passages.map((p: any) => (
+            <div key={p.ordinal}><div className="tiny muted mono">passage #{p.ordinal}</div><div className="prose small" style={{ background: "var(--surface-2)", padding: 10, borderRadius: 6 }}>{p.text}</div></div>
           ))}
+          {q.data.truncated && <p className="tiny muted">Showing the first {q.data.passages.length} of {q.data.document.chunk_count} passages.</p>}
         </div>
       )}
-      {tab === "jobs" && (
-        <table className="table"><thead><tr><th>Document</th><th>Status</th><th>Detail</th><th>Finished</th></tr></thead>
-          <tbody>{(jobs.data ?? []).map((j: any) => (
-            <tr key={j.id}><td className="small">{j.filename}</td><td><StatusBadge status={j.status === "succeeded" ? "completed" : j.status === "running" ? "running" : j.status} label={j.status} /></td><td className="small faint">{j.detail}</td><td className="faint small">{timeAgo(j.finished_at)}</td></tr>
-          ))}</tbody></table>
-      )}
-    </div>
+    </Dialog>
+  );
+}
+
+function RetrievalTest({ sources, initial, onClose }: { sources: any[]; initial: string; onClose: () => void }) {
+  const [ids, setIds] = useState<string[]>(initial ? [initial] : sources.map((s) => s.id));
+  const [query, setQuery] = useState("");
+  const search = useMutation({ mutationFn: () => api.post("/api/knowledge/search", { query, source_ids: ids, top_k: 6 }) });
+  return (
+    <Dialog size="wide" title="Test retrieval" description="See which passages an agent with access to these collections would receive." onClose={onClose}>
+      <form className="stack" onSubmit={(e) => { e.preventDefault(); if (query.trim().length > 1 && ids.length) search.mutate(); }}>
+        <div className="row wrap" style={{ gap: 6 }} role="group" aria-label="Collections">
+          {sources.map((s) => <button type="button" key={s.id} className="chip-btn" aria-pressed={ids.includes(s.id)} onClick={() => setIds(ids.includes(s.id) ? ids.filter((x) => x !== s.id) : [...ids, s.id])}>{s.name}</button>)}
+        </div>
+        <div className="row"><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Ask what an agent would search for" aria-label="Query" /><button className="btn dark" disabled={query.trim().length < 2 || !ids.length || search.isPending}>Search</button></div>
+        <InlineError error={search.error} />
+        {search.data && search.data.length === 0 && <Alert kind="neutral">No matching passages.</Alert>}
+        {search.data?.map((h: any) => (
+          <div key={h.chunk_id} className="panel" style={{ padding: 12 }}>
+            <div className="row between small"><b>{h.source} / <span className="mono">{h.document}</span> #{h.ordinal}</b><span className="tiny muted num">score {h.score} · {h.retrieval}</span></div>
+            <div className="prose small muted mt8">{h.text.slice(0, 900)}</div>
+          </div>
+        ))}
+      </form>
+    </Dialog>
   );
 }
 
 function NewSource({ onClose, onCreated }: { onClose: () => void; onCreated: (id: string) => void }) {
   const qc = useQueryClient();
-  const [f, setF] = useState({ name: "", description: "", category: "Documents", department: "" });
+  const [f, setF] = useState({ name: "", description: "", category: "Policies", department: "" });
   const m = useMutation({ mutationFn: () => api.post("/api/knowledge/sources", f), onSuccess: (r) => { qc.invalidateQueries({ queryKey: ["knowledge-sources"] }); onCreated(r.id); } });
   return (
-    <Modal title="New knowledge source" onClose={onClose} footer={<><button className="btn ghost" onClick={onClose}>Cancel</button><button className="btn primary" disabled={f.name.length < 2} onClick={() => m.mutate()}>Create</button></>}>
+    <Dialog title="New collection" onClose={onClose} footer={<><button className="btn" onClick={onClose}>Cancel</button><button className="btn dark" disabled={f.name.trim().length < 2 || m.isPending} onClick={() => m.mutate()}>Create collection</button></>}>
       <div className="form-grid">
-        <label className="field">Name<input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} placeholder="Customer Support SOPs" /></label>
+        <label className="field"><span className="req">Name</span><input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} placeholder="Customer support SOPs" /></label>
         <label className="field">Category<select value={f.category} onChange={(e) => setF({ ...f, category: e.target.value })}>
           {["Company profile", "Products & services", "Policies", "SOPs", "Technical documentation", "Business rules", "Documents"].map((c) => <option key={c}>{c}</option>)}</select></label>
         <label className="field">Department<input value={f.department} onChange={(e) => setF({ ...f, department: e.target.value })} /></label>
-        <label className="field full">Description<textarea value={f.description} onChange={(e) => setF({ ...f, description: e.target.value })} /></label>
+        <label className="field full">Description<textarea rows={3} value={f.description} onChange={(e) => setF({ ...f, description: e.target.value })} /></label>
       </div>
-      <ErrorBox error={m.error} />
-    </Modal>
+      <InlineError error={m.error} />
+    </Dialog>
+  );
+}
+
+function TextDoc({ source, onClose, onDone }: { source: any; onClose: () => void; onDone: () => void }) {
+  const [f, setF] = useState({ title: "", content: "" });
+  const m = useMutation({ mutationFn: () => api.post(`/api/knowledge/sources/${source.id}/text`, f), onSuccess: onDone });
+  return (
+    <Dialog size="wide" title={`New text document in ${source.name}`} onClose={onClose} footer={<><button className="btn" onClick={onClose}>Cancel</button><button className="btn dark" disabled={!f.title || !f.content || m.isPending} onClick={() => m.mutate()}>Add and index</button></>}>
+      <div className="stack">
+        <label className="field"><span className="req">Title</span><input value={f.title} onChange={(e) => setF({ ...f, title: e.target.value })} placeholder="Company profile" /></label>
+        <label className="field"><span className="req">Content</span><textarea rows={14} value={f.content} onChange={(e) => setF({ ...f, content: e.target.value })} placeholder="Markdown supported" /></label>
+        <InlineError error={m.error} />
+      </div>
+    </Dialog>
   );
 }

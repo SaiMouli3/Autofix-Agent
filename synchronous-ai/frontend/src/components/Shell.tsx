@@ -4,274 +4,363 @@ import {
   Bell,
   Bot,
   CalendarClock,
-  ChevronDown,
+  ChevronRight,
+  ChevronsLeft,
+  ChevronsRight,
   ClipboardList,
-  FolderKanban,
-  KeyRound,
-  LayoutDashboard,
+  LayoutGrid,
   Library,
+  ListFilter,
   LogOut,
+  Menu as MenuIcon,
+  Pin,
   Plug,
   Plus,
-  ScrollText,
   Search,
   Settings,
   ShieldCheck,
-  Users,
+  UserRound,
 } from "lucide-react";
 import { createContext, ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
 import { BRAND } from "../brand";
 import { api } from "../lib/api";
-import { STATUS_LABEL, timeAgo } from "../lib/format";
+import { timeAgo } from "../lib/format";
+import { useDebounced, usePref } from "../lib/prefs";
 import { useSession } from "../lib/session";
+import { statusOf } from "../lib/status";
 import { ActivityEvent, useActivityStream } from "../lib/stream";
-import { AgentAvatar } from "./ui";
+import { BotMark } from "./BotMark";
+import { ErrorBoundary, Menu } from "./ui";
 
-// ------------------------------------------------------------------ live activity store (unread + notifications)
+// ------------------------------------------------------------------ live store (unread markers + notifications)
 
-interface Notif { id: number; agentId: string; taskId: string; text: string; ts: string; kind: string }
-const LiveCtx = createContext<{ unread: Record<string, number>; notifs: Notif[]; markSeen: (agentId: string) => void; clear: () => void }>({
-  unread: {}, notifs: [], markSeen: () => {}, clear: () => {},
-});
+interface Notif { id: number; agentId: string; taskId: string; text: string; ts: string; kind: "approval" | "completed" | "failed" }
+interface Live { unread: Record<string, number>; notifs: Notif[]; seenAt: number; markSeen: (agentId: string) => void; markRead: () => void; stream: string }
+const LiveCtx = createContext<Live>({ unread: {}, notifs: [], seenAt: 0, markSeen: () => {}, markRead: () => {}, stream: "connecting" });
 export const useLive = () => useContext(LiveCtx);
 
-export function Shell({ title, crumbs, actions, children }: { title?: string; crumbs?: ReactNode; actions?: ReactNode; children: ReactNode }) {
+export function LiveProvider({ children }: { children: ReactNode }) {
+  const qc = useQueryClient();
+  const loc = useLocation();
+  const path = useRef(loc.pathname);
+  path.current = loc.pathname;
+  const [unread, setUnread] = useState<Record<string, number>>({});
+  const [notifs, setNotifs] = useState<Notif[]>([]);
+  const [seenAt, setSeenAt] = useState(Date.now());
+  const timer = useRef<number | null>(null);
+  const stream = useActivityStream((e: ActivityEvent) => {
+    if (timer.current === null) {
+      timer.current = window.setTimeout(() => {
+        timer.current = null;
+        for (const k of ["agents", "approvals-count", "overview", "tasks"]) qc.invalidateQueries({ queryKey: [k] });
+      }, 700);
+    }
+    const st = e.data?.status;
+    const kind: Notif["kind"] | null =
+      e.type === "approval" && st === "waiting_for_approval" ? "approval"
+        : e.type === "status" && st === "completed" ? "completed"
+          : e.type === "status" && (st === "failed" || st === "timed_out") ? "failed" : null;
+    if (!kind) return;
+    if (!path.current.startsWith(`/agents/${e.agent_id}`)) setUnread((u) => ({ ...u, [e.agent_id]: (u[e.agent_id] ?? 0) + 1 }));
+    setNotifs((n) => [{ id: e.id, agentId: e.agent_id, taskId: e.task_id, text: e.summary, ts: e.ts, kind }, ...n].slice(0, 40));
+  });
+  const markSeen = useCallback((id: string) => setUnread((u) => (u[id] ? { ...u, [id]: 0 } : u)), []);
+  const markRead = useCallback(() => setSeenAt(Date.now()), []);
+  const value = useMemo(() => ({ unread, notifs, seenAt, markSeen, markRead, stream }), [unread, notifs, seenAt, markSeen, markRead, stream]);
+  return <LiveCtx.Provider value={value}>{children}</LiveCtx.Provider>;
+}
+
+// ------------------------------------------------------------------ shell
+
+export interface Crumb { label: string; to?: string }
+
+export function Shell({ crumbs, children, full, actions }: { crumbs: Crumb[]; children: ReactNode; full?: boolean; actions?: ReactNode }) {
+  const [collapsed, setCollapsed] = usePref("nav.collapsed", false);
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const loc = useLocation();
+  useEffect(() => setMobileOpen(false), [loc.pathname]);
+  useEffect(() => {
+    if (!mobileOpen) return;
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setMobileOpen(false);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [mobileOpen]);
   return (
-    <div className="app">
-      <Sidebar />
+    <div className={`app ${collapsed ? "collapsed" : ""} ${mobileOpen ? "mobile-nav" : ""}`}>
+      <a className="skip-link" href="#main">Skip to content</a>
+      <Sidebar collapsed={collapsed} onToggle={() => setCollapsed(!collapsed)} />
+      {mobileOpen && <div className="backdrop" style={{ zIndex: 115 }} onClick={() => setMobileOpen(false)} aria-hidden />}
       <div className="main">
-        <Topbar title={title} crumbs={crumbs} actions={actions} />
-        <main className="content" id="main">
-          <div className="content-inner">{children}</div>
+        <Topbar crumbs={crumbs} actions={actions} onMenu={() => setMobileOpen(true)} />
+        <main className="content" id="main" tabIndex={-1}>
+          <ErrorBoundary resetKey={loc.pathname}>
+            {full ? children : <div className="page">{children}</div>}
+          </ErrorBoundary>
         </main>
       </div>
     </div>
   );
 }
 
-export function LiveProvider({ children }: { children: ReactNode }) {
-  const qc = useQueryClient();
-  const loc = useLocation();
-  const [unread, setUnread] = useState<Record<string, number>>({});
-  const [notifs, setNotifs] = useState<Notif[]>([]);
-  const path = useRef(loc.pathname);
-  path.current = loc.pathname;
-  const timer = useRef<number | null>(null);
-
-  useActivityStream((e: ActivityEvent) => {
-    // Coalesce cache invalidations so bursts of events do not hammer the API.
-    if (timer.current === null) {
-      timer.current = window.setTimeout(() => {
-        timer.current = null;
-        qc.invalidateQueries({ queryKey: ["agents"] });
-        qc.invalidateQueries({ queryKey: ["approvals-count"] });
-        qc.invalidateQueries({ queryKey: ["overview"] });
-      }, 800);
-    }
-    const terminal = e.type === "status" && ["completed", "failed", "timed_out"].includes(e.data?.status);
-    const approval = e.type === "approval" && e.data?.status === "waiting_for_approval";
-    if (terminal || approval) {
-      const viewing = path.current.startsWith(`/agents/${e.agent_id}`);
-      if (!viewing) setUnread((u) => ({ ...u, [e.agent_id]: (u[e.agent_id] ?? 0) + 1 }));
-      setNotifs((n) => [{ id: e.id, agentId: e.agent_id, taskId: e.task_id, text: e.summary, ts: e.ts, kind: approval ? "approval" : e.data.status }, ...n].slice(0, 30));
-    }
-  });
-  const markSeen = useCallback((agentId: string) => setUnread((u) => (u[agentId] ? { ...u, [agentId]: 0 } : u)), []);
-  const clear = useCallback(() => setNotifs([]), []);
-  const value = useMemo(() => ({ unread, notifs, markSeen, clear }), [unread, notifs, markSeen, clear]);
-  return <LiveCtx.Provider value={value}>{children}</LiveCtx.Provider>;
-}
-
-// ------------------------------------------------------------------ sidebar
-
 const NAV = [
-  { to: "/", label: "Overview", icon: LayoutDashboard, end: true },
-  { to: "/agents", label: "My Agents", icon: Bot },
+  { to: "/", label: "Overview", icon: LayoutGrid, end: true },
+  { to: "/agents", label: "Agents", icon: Bot, end: true },
   { to: "/tasks", label: "Tasks", icon: ClipboardList },
-  { to: "/workspaces", label: "Agent Workspaces", icon: FolderKanban },
   { to: "/integrations", label: "Integrations", icon: Plug },
-  { to: "/knowledge", label: "Company Knowledge", icon: Library },
-  { to: "/schedules", label: "Workflows & Schedules", icon: CalendarClock },
-  { to: "/approvals", label: "Approvals", icon: ShieldCheck, badge: "approvals" },
-  { to: "/monitoring", label: "Monitoring & Usage", icon: Activity },
-  { to: "/audit", label: "Audit Logs", icon: ScrollText, perm: "audit:read" },
-  { to: "/team", label: "Team Management", icon: Users },
+  { to: "/knowledge", label: "Knowledge", icon: Library },
+  { to: "/workflows", label: "Workflows", icon: CalendarClock },
+  { to: "/approvals", label: "Approvals", icon: ShieldCheck, badge: true },
+  { to: "/monitoring", label: "Monitoring", icon: Activity },
   { to: "/settings", label: "Settings", icon: Settings },
 ];
 
-function Sidebar() {
-  const { can } = useSession();
+const AGENT_FILTERS = [
+  { key: "", label: "All agents" },
+  { key: "attention", label: "Needs attention" },
+  { key: "running", label: "Running" },
+  { key: "idle", label: "Idle" },
+  { key: "inactive", label: "Draft or disabled" },
+];
+
+function Sidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => void }) {
+  const { me, can } = useSession();
   const { unread } = useLive();
-  const agents = useQuery({ queryKey: ["agents", "sidebar"], queryFn: () => api.get("/api/agents?page_size=200"), refetchInterval: 15000 });
-  const approvals = useQuery({ queryKey: ["approvals-count"], queryFn: () => api.get("/api/approvals?status=pending&page_size=1"), refetchInterval: 20000 });
-  const pending = approvals.data?.total ?? 0;
-  return (
-    <aside className="sidebar" aria-label="Primary">
-      <Link to="/" className="brand" aria-label={BRAND.name}>
-        <img src={BRAND.logo} alt="" />
-        <div>
-          <div className="brand-name">{BRAND.name}</div>
-          <div className="brand-sub">{BRAND.tagline}</div>
-        </div>
-      </Link>
-      <nav className="nav">
-        {NAV.filter((n) => !n.perm || can(n.perm)).map((n) => (
-          <NavLink key={n.to} to={n.to} end={n.end} className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}>
-            <n.icon />
-            <span>{n.label}</span>
-            {n.badge === "approvals" && pending > 0 && <em className="nav-count" aria-label={`${pending} pending`}>{pending}</em>}
-          </NavLink>
-        ))}
-      </nav>
-      <div className="nav-section">
-        <span>My Agents</span>
-        {can("agents:write") && (
-          <Link to="/agents/new" className="btn xs primary" title="Create agent" aria-label="Create agent">
-            <Plus /> <span>New</span>
-          </Link>
-        )}
-      </div>
-      <div className="agent-list">
-        {agents.isLoading && <div className="skeleton" style={{ height: 120 }} />}
-        {agents.data?.items?.length === 0 && <div className="faint small" style={{ padding: "6px 10px" }}>No agents yet.</div>}
-        {agents.data?.items?.map((a: any) => (
-          <NavLink key={a.id} to={`/agents/${a.id}`} className={({ isActive }) => `agent-link ${isActive ? "active" : ""}`} title={`${a.name} — ${STATUS_LABEL[a.live_status] ?? a.live_status}`}>
-            <AgentAvatar avatar={a.avatar} size="sm" status={a.live_status} />
-            <div className="meta">
-              <div className="name">{a.name}</div>
-              <div className="sub">
-                <span>{a.category}</span>·<span>{STATUS_LABEL[a.live_status] ?? a.live_status}</span>
-                {(a.task_counts?.running ?? 0) > 0 && <span className="badge running" style={{ padding: "0 6px" }}>{a.task_counts.running} active</span>}
-              </div>
-            </div>
-            {(unread[a.id] ?? 0) + (a.pending_approvals ?? 0) > 0 && (
-              <span className="nav-count" style={{ display: "grid" }} aria-label="unread">{(unread[a.id] ?? 0) + (a.pending_approvals ?? 0)}</span>
-            )}
-          </NavLink>
-        ))}
-      </div>
-      <div className="legal">Built on the OpenHands Software Agent SDK (MIT).</div>
-    </aside>
-  );
-}
-
-// ------------------------------------------------------------------ topbar
-
-function Topbar({ title, crumbs, actions }: { title?: string; crumbs?: ReactNode; actions?: ReactNode }) {
-  const { me } = useSession();
   const nav = useNavigate();
   const qc = useQueryClient();
-  const { notifs, clear } = useLive();
-  const [menu, setMenu] = useState<"" | "user" | "notif">("");
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const h = (e: MouseEvent) => ref.current && !ref.current.contains(e.target as Node) && setMenu("");
-    document.addEventListener("mousedown", h);
-    return () => document.removeEventListener("mousedown", h);
-  }, []);
+  const [q, setQ] = useState("");
+  const [filter, setFilter] = usePref("agents.filter", "");
+  const [group, setGroup] = usePref<"none" | "category" | "team">("agents.group", "none");
+  const [pins, setPins] = usePref<string[]>(`agents.pins.${me.user.id}`, []);
+  const agents = useQuery({ queryKey: ["agents", "nav"], queryFn: ({ signal }) => api.get("/api/agents?page_size=500", signal), refetchInterval: 20000 });
+  const teams = useQuery({ queryKey: ["teams"], queryFn: ({ signal }) => api.get("/api/teams", signal), enabled: group === "team" });
+  const approvals = useQuery({ queryKey: ["approvals-count"], queryFn: ({ signal }) => api.get("/api/approvals?status=pending&page_size=1", signal), refetchInterval: 30000 });
+  const pending = approvals.data?.total ?? 0;
+  const all: any[] = agents.data?.items ?? [];
+  const visible = all.filter((a) => {
+    if (q && !a.name.toLowerCase().includes(q.toLowerCase())) return false;
+    const s = a.live_status;
+    if (filter === "attention") return s === "waiting_for_approval" || s === "failed" || (unread[a.id] ?? 0) > 0;
+    if (filter === "running") return s === "running" || s === "queued";
+    if (filter === "idle") return a.status === "active" && ["idle", "completed"].includes(s);
+    if (filter === "inactive") return a.status !== "active";
+    return true;
+  });
+  const pinned = visible.filter((a) => pins.includes(a.id));
+  const rest = visible.filter((a) => !pins.includes(a.id));
+  const teamName = (id: string | null) => (teams.data ?? []).find((t: any) => t.id === id)?.name ?? "No team";
+  const groups: [string, any[]][] = group === "none" ? [["", rest]]
+    : Object.entries(rest.reduce((acc: Record<string, any[]>, a) => {
+      const k = group === "category" ? a.category || "General" : teamName(a.team_id);
+      (acc[k] ||= []).push(a);
+      return acc;
+    }, {})).sort(([a], [b]) => a.localeCompare(b));
+  const togglePin = (id: string) => setPins(pins.includes(id) ? pins.filter((p) => p !== id) : [...pins, id]);
   const logout = async () => {
     await api.post("/api/auth/logout").catch(() => {});
     qc.clear();
     window.location.href = "/login";
   };
-  const initials = me.user.name.split(" ").map((p) => p[0]).slice(0, 2).join("").toUpperCase();
+  const initials = me.user.name.split(/\s+/).map((p) => p[0]).slice(0, 2).join("").toUpperCase();
+
+  return (
+    <aside className="sidebar" aria-label="Primary navigation">
+      <div className="side-head">
+        <Link to="/" aria-label={`${BRAND.name} home`} data-tip={collapsed ? BRAND.name : undefined}><img className="brand-mark" src={BRAND.logo} alt="" /></Link>
+        <div className="brand-text grow">
+          <div className="brand-name">{BRAND.name}</div>
+          <div className="brand-org" title={me.org.name}>{me.org.name}</div>
+        </div>
+        {!collapsed && <button className="btn ghost icon sm hide-sm" onClick={onToggle} aria-label="Collapse navigation" data-tip="Collapse"><ChevronsLeft /></button>}
+      </div>
+      <nav className="nav" aria-label="Sections">
+        {collapsed && <button className="nav-item" onClick={onToggle} aria-label="Expand navigation" data-tip="Expand" style={{ border: 0, background: "none", cursor: "pointer" }}><ChevronsRight /></button>}
+        {NAV.map((n) => (
+          <NavLink key={n.to} to={n.to} end={n.end} className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`} data-tip={collapsed ? n.label : undefined}>
+            <n.icon aria-hidden />
+            <span>{n.label}</span>
+            {n.badge && pending > 0 && <em className="nav-count" aria-label={`${pending} pending approvals`}>{pending}</em>}
+          </NavLink>
+        ))}
+      </nav>
+      <div className="side-section">
+        <span className="side-label" id="agents-label">Agents</span>
+        <div className="row" style={{ gap: 2 }}>
+          <Menu label="Agent list options" trigger={(p) => <button {...p} className="btn ghost icon sm" aria-label="Filter and group agents" data-tip="Filter & group"><ListFilter /></button>}
+            items={[
+              ...AGENT_FILTERS.map((f) => ({ label: `${filter === f.key ? "✓ " : ""}${f.label}`, onSelect: () => setFilter(f.key) })),
+              { label: "", separator: true },
+              { label: `${group === "none" ? "✓ " : ""}No grouping`, onSelect: () => setGroup("none") },
+              { label: `${group === "category" ? "✓ " : ""}Group by category`, onSelect: () => setGroup("category") },
+              { label: `${group === "team" ? "✓ " : ""}Group by team`, onSelect: () => setGroup("team") },
+            ]} />
+          {can("agents:write") && <Link className="btn ghost icon sm" to="/agents/new" aria-label="Create agent" data-tip="New agent"><Plus /></Link>}
+        </div>
+      </div>
+      <div className="agent-tools">
+        <input type="search" placeholder="Find agent" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Find agent" />
+      </div>
+      {filter && !collapsed && (
+        <div className="tiny muted" style={{ padding: "0 16px 4px" }}>
+          {AGENT_FILTERS.find((f) => f.key === filter)?.label} · <button className="disclose" onClick={() => setFilter("")}>clear</button>
+        </div>
+      )}
+      <div className="agent-list" role="list" aria-labelledby="agents-label">
+        {agents.isLoading && <div className="stack tight" style={{ padding: 8 }}>{[1, 2, 3].map((i) => <div key={i} className="skel" style={{ height: 30 }} />)}</div>}
+        {agents.isError && <p className="tiny muted" style={{ padding: 8 }}>Agents unavailable. <button className="disclose" onClick={() => agents.refetch()}>Retry</button></p>}
+        {agents.data && all.length === 0 && !collapsed && (
+          <div className="tiny muted" style={{ padding: "6px 8px" }}>
+            No agents yet.{can("agents:write") && <> <Link to="/agents/new" style={{ color: "var(--accent)" }}>Create your first agent</Link>.</>}
+          </div>
+        )}
+        {agents.data && all.length > 0 && visible.length === 0 && !collapsed && <div className="tiny muted" style={{ padding: "6px 8px" }}>No agents match.</div>}
+        {pinned.length > 0 && <div className="agent-group">Pinned</div>}
+        {pinned.map((a) => <AgentRow key={a.id} a={a} unread={unread[a.id] ?? 0} pinned onPin={togglePin} collapsed={collapsed} />)}
+        {groups.map(([g, list]) => (
+          <div key={g || "all"}>
+            {(g || (pinned.length > 0 && list.length > 0)) && <div className="agent-group">{g || "All"}</div>}
+            {list.map((a) => <AgentRow key={a.id} a={a} unread={unread[a.id] ?? 0} onPin={togglePin} collapsed={collapsed} />)}
+          </div>
+        ))}
+      </div>
+      <div className="side-foot">
+        <Menu up label="Account" trigger={(p) => (
+          <button {...p} className="user-btn" aria-label={`Account: ${me.user.name}`}>
+            <span className="initials" aria-hidden>{initials}</span>
+            <span className="meta grow" style={{ minWidth: 0 }}>
+              <div className="small strong ellipsis">{me.user.name}</div>
+              <div className="tiny muted ellipsis">{me.role_label}</div>
+            </span>
+          </button>
+        )} items={[
+          { label: "Account & password", icon: UserRound, onSelect: () => nav("/settings?tab=account") },
+          { label: "Organization settings", icon: Settings, onSelect: () => nav("/settings") },
+          { label: "", separator: true },
+          { label: "Sign out", icon: LogOut, onSelect: logout },
+        ]} />
+      </div>
+    </aside>
+  );
+}
+
+function AgentRow({ a, unread, pinned, onPin, collapsed }: { a: any; unread: number; pinned?: boolean; onPin: (id: string) => void; collapsed: boolean }) {
+  const s = statusOf(a.live_status);
+  const running = a.task_counts?.running ?? 0;
+  const attention = unread + (a.pending_approvals ?? 0);
+  return (
+    <div role="listitem" style={{ position: "relative" }}>
+      <NavLink to={`/agents/${a.id}`} className={({ isActive }) => `agent-row ${isActive ? "active" : ""}`}
+        data-tip={collapsed ? `${a.name} · ${s.label}` : undefined} aria-label={`${a.name}, ${s.label}${attention ? `, ${attention} need attention` : ""}`}>
+        <BotMark seed={a.id} avatar={a.avatar} size={26} state={a.status !== "active" ? a.status : a.live_status} />
+        <span className="meta grow" style={{ minWidth: 0 }}>
+          <div className="name">{a.name}</div>
+          <div className="sub">
+            <span>{s.label}</span>
+            {running > 1 && <span>· {running} tasks</span>}
+          </div>
+        </span>
+        {attention > 0 && <span className="unread" aria-hidden>{attention}</span>}
+        <button className={`pin ${pinned ? "on" : ""}`} onClick={(e) => { e.preventDefault(); e.stopPropagation(); onPin(a.id); }}
+          aria-label={pinned ? `Unpin ${a.name}` : `Pin ${a.name}`} aria-pressed={!!pinned}>
+          <Pin fill={pinned ? "currentColor" : "none"} />
+        </button>
+      </NavLink>
+    </div>
+  );
+}
+
+// ------------------------------------------------------------------ topbar
+
+function Topbar({ crumbs, actions, onMenu }: { crumbs: Crumb[]; actions?: ReactNode; onMenu: () => void }) {
+  const { me } = useSession();
   return (
     <header className="topbar">
-      <div>
-        {crumbs && <div className="crumbs">{crumbs}</div>}
-        {title && <div className="topbar-title">{title}</div>}
-      </div>
+      <button className="btn ghost icon show-sm" onClick={onMenu} aria-label="Open navigation"><MenuIcon /></button>
+      <nav className="crumbs" aria-label="Breadcrumb">
+        {crumbs.map((c, i) => (
+          <span key={i} className="row" style={{ gap: 6, minWidth: 0 }}>
+            {i > 0 && <ChevronRight aria-hidden />}
+            {c.to && i < crumbs.length - 1 ? <Link to={c.to}>{c.label}</Link> : <span className="cur" aria-current={i === crumbs.length - 1 ? "page" : undefined}>{c.label}</span>}
+          </span>
+        ))}
+      </nav>
       <GlobalSearch />
       {actions}
-      <span className={`env-pill ${me.env}`} title={`Runtime: ${me.runtime}`}>{me.env} · {me.runtime}</span>
-      <div className="row" ref={ref} style={{ position: "relative" }}>
-        <button className="icon-btn" aria-label="Notifications" onClick={() => setMenu(menu === "notif" ? "" : "notif")}>
-          <Bell />
-          {notifs.length > 0 && <span className="dot-badge" />}
-        </button>
-        <button className="user-chip" onClick={() => setMenu(menu === "user" ? "" : "user")} aria-haspopup="menu">
-          <span className="initials">{initials}</span>
-          <span className="small" style={{ textAlign: "left", lineHeight: 1.2 }}>
-            <div className="strong">{me.user.name}</div>
-            <div className="faint tiny">{me.org.name}</div>
-          </span>
-          <ChevronDown size={14} />
-        </button>
-        {menu === "notif" && (
-          <div className="menu" style={{ width: 360 }} role="menu">
-            <div className="row between" style={{ padding: "4px 8px 8px" }}>
-              <b className="small">Notifications</b>
-              {notifs.length > 0 && <button className="btn xs ghost" onClick={clear}>Clear</button>}
-            </div>
-            {notifs.length === 0 && <div className="faint small" style={{ padding: 10 }}>Completions and approval requests appear here in real time.</div>}
-            {notifs.map((n) => (
-              <button key={n.id} className="menu-item" onClick={() => { setMenu(""); nav(n.kind === "approval" ? "/approvals" : `/tasks/${n.taskId}`); }}>
-                <span className={`status-dot ${n.kind === "approval" ? "waiting_for_approval" : n.kind}`} />
-                <span className="grow small">{n.text}<div className="faint tiny">{timeAgo(n.ts)}</div></span>
-              </button>
-            ))}
-          </div>
-        )}
-        {menu === "user" && (
-          <div className="menu" role="menu">
-            <div style={{ padding: "6px 10px 8px" }}>
-              <div className="strong">{me.user.name}</div>
-              <div className="faint small">{me.user.email}</div>
-              <div className="badge accent mt8">{me.role_label}</div>
-            </div>
-            <div className="menu-sep" />
-            <button className="menu-item" onClick={() => { setMenu(""); nav("/settings?tab=account"); }}><KeyRound /> Account & password</button>
-            <button className="menu-item" onClick={() => { setMenu(""); nav("/settings"); }}><Settings /> Organization settings</button>
-            <div className="menu-sep" />
-            <button className="menu-item" onClick={logout}><LogOut /> Sign out</button>
-          </div>
-        )}
-      </div>
+      <span className={`env-tag ${me.env} hide-sm`} title={`Environment ${me.env}, ${me.runtime} runtime`}>{me.env === "production" ? "prod" : me.env} · {me.runtime}</span>
+      <Notifications />
     </header>
+  );
+}
+
+function Notifications() {
+  const { notifs, seenAt, markRead, stream } = useLive();
+  const nav = useNavigate();
+  const fresh = notifs.filter((n) => new Date(n.ts).getTime() > seenAt).length;
+  return (
+    <Menu label="Notifications" trigger={(p) => (
+      <button {...p} className="btn ghost icon" aria-label={`Notifications${fresh ? `, ${fresh} new` : ""}`} onClick={() => { p.onClick(); markRead(); }} style={{ position: "relative" }}>
+        <Bell />
+        {fresh > 0 && <span style={{ position: "absolute", top: 6, right: 6, width: 7, height: 7, borderRadius: 4, background: "var(--accent)" }} aria-hidden />}
+      </button>
+    )} items={notifs.length === 0
+      ? [{ label: stream === "live" ? "No new activity this session" : "Connecting to live activity…", disabled: true }]
+      : notifs.slice(0, 12).map((n) => ({
+        label: `${n.kind === "approval" ? "Approval needed" : n.kind === "completed" ? "Completed" : "Failed"} — ${n.text.slice(0, 70)} · ${timeAgo(n.ts)}`,
+        icon: n.kind === "approval" ? ShieldCheck : n.kind === "completed" ? ClipboardList : Activity,
+        onSelect: () => nav(n.kind === "approval" ? "/approvals" : `/tasks/${n.taskId}`),
+      }))} />
   );
 }
 
 function GlobalSearch() {
   const [q, setQ] = useState("");
   const [open, setOpen] = useState(false);
-  const [debounced, setDebounced] = useState("");
+  const [hl, setHl] = useState(0);
+  const debounced = useDebounced(q.trim(), 200);
   const nav = useNavigate();
-  useEffect(() => {
-    const t = setTimeout(() => setDebounced(q.trim()), 250);
-    return () => clearTimeout(t);
-  }, [q]);
-  const agents = useQuery({ queryKey: ["search-agents", debounced], queryFn: () => api.get(`/api/agents?q=${encodeURIComponent(debounced)}&page_size=5`), enabled: debounced.length > 1 });
-  const tasks = useQuery({ queryKey: ["search-tasks", debounced], queryFn: () => api.get(`/api/tasks?q=${encodeURIComponent(debounced)}&page_size=6`), enabled: debounced.length > 1 });
+  const input = useRef<HTMLInputElement>(null);
+  const agents = useQuery({ queryKey: ["search-agents", debounced], queryFn: ({ signal }) => api.get(`/api/agents?q=${encodeURIComponent(debounced)}&page_size=5`, signal), enabled: debounced.length > 1 });
+  const tasks = useQuery({ queryKey: ["search-tasks", debounced], queryFn: ({ signal }) => api.get(`/api/tasks?q=${encodeURIComponent(debounced)}&page_size=6`, signal), enabled: debounced.length > 1 });
+  const results = [
+    ...(agents.data?.items ?? []).map((a: any) => ({ kind: "Agent", id: a.id, label: a.name, sub: a.category, to: `/agents/${a.id}`, a })),
+    ...(tasks.data?.items ?? []).map((t: any) => ({ kind: "Task", id: t.id, label: t.title, sub: t.agent_name, to: `/tasks/${t.id}`, t })),
+  ];
+  useEffect(() => setHl(0), [debounced]);
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
-        e.preventDefault();
-        document.getElementById("global-search")?.focus();
-      }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); input.current?.focus(); setOpen(true); }
     };
     window.addEventListener("keydown", h);
     return () => window.removeEventListener("keydown", h);
   }, []);
-  const go = (path: string) => { setOpen(false); setQ(""); nav(path); };
+  const go = (to: string) => { setOpen(false); setQ(""); input.current?.blur(); nav(to); };
+  const onKey = (e: React.KeyboardEvent) => {
+    if (e.key === "ArrowDown") { e.preventDefault(); setHl((h) => Math.min(h + 1, results.length - 1)); }
+    if (e.key === "ArrowUp") { e.preventDefault(); setHl((h) => Math.max(h - 1, 0)); }
+    if (e.key === "Enter" && results[hl]) { e.preventDefault(); go(results[hl].to); }
+    if (e.key === "Escape") { setOpen(false); input.current?.blur(); }
+  };
+  const isMac = typeof navigator !== "undefined" && /Mac/.test(navigator.platform);
   return (
-    <div className="search" onBlur={() => setTimeout(() => setOpen(false), 150)}>
-      <Search />
-      <input id="global-search" placeholder="Search agents and tasks  (Ctrl K)" value={q} aria-label="Global search"
-        onFocus={() => setOpen(true)} onChange={(e) => { setQ(e.target.value); setOpen(true); }} />
+    <div className="search" role="combobox" aria-expanded={open && debounced.length > 1} aria-haspopup="listbox" aria-owns="search-results">
+      <Search aria-hidden />
+      <input ref={input} type="search" placeholder="Search agents and tasks" value={q} aria-label="Search agents and tasks" aria-controls="search-results"
+        aria-activedescendant={results[hl] ? `sr-${results[hl].id}` : undefined}
+        onFocus={() => setOpen(true)} onBlur={() => setTimeout(() => setOpen(false), 150)} onKeyDown={onKey}
+        onChange={(e) => { setQ(e.target.value); setOpen(true); }} />
+      <span className="kbd" aria-hidden>{isMac ? "⌘K" : "Ctrl K"}</span>
       {open && debounced.length > 1 && (
-        <div className="search-results">
-          {agents.data?.items?.map((a: any) => (
-            <a key={a.id} onMouseDown={() => go(`/agents/${a.id}`)} href={`/agents/${a.id}`}>
-              <AgentAvatar avatar={a.avatar} size="sm" /> <span className="grow">{a.name}</span><span className="faint tiny">Agent</span>
+        <div className="search-pop" id="search-results" role="listbox">
+          {(agents.isFetching || tasks.isFetching) && !results.length && <div className="tiny muted" style={{ padding: 8 }}>Searching…</div>}
+          {!agents.isFetching && !tasks.isFetching && !results.length && <div className="tiny muted" style={{ padding: 8 }}>No agents or tasks match “{debounced}”.</div>}
+          {results.map((r, i) => (
+            <a key={r.id} id={`sr-${r.id}`} role="option" aria-selected={i === hl} href={r.to}
+              onMouseDown={(e) => { e.preventDefault(); go(r.to); }} onMouseEnter={() => setHl(i)}>
+              {r.kind === "Agent" ? <BotMark seed={r.a.id} avatar={r.a.avatar} size={20} /> : <ClipboardList size={16} className="muted" aria-hidden />}
+              <span className="grow ellipsis">{r.label}</span>
+              <span className="tiny muted">{r.kind} · {r.sub}</span>
             </a>
           ))}
-          {tasks.data?.items?.map((t: any) => (
-            <a key={t.id} onMouseDown={() => go(`/tasks/${t.id}`)} href={`/tasks/${t.id}`}>
-              <span className={`status-dot ${t.status}`} /> <span className="grow ellipsis">{t.title}</span><span className="faint tiny">{t.agent_name}</span>
-            </a>
-          ))}
-          {!agents.data?.items?.length && !tasks.data?.items?.length && <div className="faint small" style={{ padding: 8 }}>No matches.</div>}
         </div>
       )}
     </div>

@@ -1,17 +1,19 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { LogIn, Sparkles } from "lucide-react";
 import { FormEvent, useState } from "react";
 import { BRAND } from "../brand";
-import { ErrorBox, Loading } from "../components/ui";
+import { InlineError, Spinner } from "../components/ui";
 import { api } from "../lib/api";
 
 export default function Login() {
   const qc = useQueryClient();
-  const status = useQuery({ queryKey: ["auth-status"], queryFn: () => api.get("/api/auth/status") });
+  const status = useQuery({ queryKey: ["auth-status"], queryFn: ({ signal }) => api.get("/api/auth/status", signal) });
   const [form, setForm] = useState({ org_name: "", name: "", email: "", password: "", bootstrap_token: "" });
   const [err, setErr] = useState<any>(null);
   const [busy, setBusy] = useState(false);
   const setup = status.data?.needs_setup;
+  const next = new URLSearchParams(window.location.search).get("next");
+  const safeNext = next && next.startsWith("/") && !next.startsWith("//") ? next : "/";
+  const expired = !!next && !setup;
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
@@ -21,7 +23,7 @@ export default function Login() {
       if (setup) await api.post("/api/auth/setup", form);
       else await api.post("/api/auth/login", { email: form.email, password: form.password });
       qc.clear();
-      window.location.href = "/";
+      window.location.href = setup ? "/" : safeNext;
     } catch (ex) {
       setErr(ex);
     } finally {
@@ -31,48 +33,47 @@ export default function Login() {
   const f = (k: keyof typeof form) => ({ value: form[k], onChange: (e: any) => setForm({ ...form, [k]: e.target.value }) });
 
   return (
-    <div className="center-page">
-      <div className="card login-card" style={{ padding: 28 }}>
-        <div className="brand">
-          <img src={BRAND.logo} alt="" />
+    <main className="login">
+      <div className="panel">
+        <div className="row" style={{ gap: 10, marginBottom: 24 }}>
+          <img src={BRAND.logo} alt="" width={30} height={30} />
           <div>
-            <div className="brand-name">{BRAND.name}</div>
-            <div className="brand-sub">{BRAND.tagline}</div>
+            <div className="strong">{BRAND.name}</div>
+            <div className="tiny muted">{BRAND.tagline}</div>
           </div>
         </div>
-        {status.isLoading ? (
-          <Loading />
-        ) : (
-          <form className="stack" onSubmit={submit}>
+        {status.isLoading ? <Spinner /> : (
+          <form className="stack" onSubmit={submit} noValidate={false}>
             <div>
-              <h2 style={{ margin: "0 0 4px", fontSize: 19 }}>{setup ? "Set up your organization" : "Sign in"}</h2>
-              <p className="muted small" style={{ margin: 0 }}>
-                {setup ? "Create the first administrator account. You can invite your team afterwards." : "Use your organization account."}
+              <h1 style={{ fontSize: 20 }}>{setup ? "Set up your organization" : "Sign in"}</h1>
+              <p className="muted small" style={{ margin: "4px 0 0" }}>
+                {setup ? "Create the first administrator. You can invite your team afterwards." : expired ? "Your session ended. Sign in to continue where you left off." : "Use your organization account."}
               </p>
             </div>
             {setup && (
               <>
-                <label className="field">Organization name<input required minLength={2} {...f("org_name")} placeholder="Acme Consulting" /></label>
-                <label className="field">Your name<input required {...f("name")} autoComplete="name" /></label>
+                <label className="field"><span className="req">Organization name</span><input required minLength={2} {...f("org_name")} autoComplete="organization" /></label>
+                <label className="field"><span className="req">Your name</span><input required {...f("name")} autoComplete="name" /></label>
               </>
             )}
-            <label className="field">Email<input required type="email" autoComplete="email" {...f("email")} /></label>
+            <label className="field"><span className="req">Email</span><input required type="email" autoComplete="email" {...f("email")} /></label>
             <label className="field">
-              Password
-              <input required type="password" autoComplete={setup ? "new-password" : "current-password"} {...f("password")} />
-              {setup && <span className="help">At least 12 characters mixing upper/lowercase, digits or symbols.</span>}
+              <span className="req">Password</span>
+              <input required type="password" autoComplete={setup ? "new-password" : "current-password"} {...f("password")} minLength={setup ? 12 : undefined} />
+              {setup && <span className="help">At least 12 characters, mixing upper/lowercase, digits or symbols.</span>}
             </label>
             {setup && status.data?.bootstrap_token_required && (
-              <label className="field">Bootstrap token<input required {...f("bootstrap_token")} /><span className="help">Provided by whoever deployed this instance (SCA_BOOTSTRAP_TOKEN).</span></label>
+              <label className="field"><span className="req">Bootstrap token</span><input required {...f("bootstrap_token")} autoComplete="off" />
+                <span className="help">Provided by whoever deployed this instance.</span></label>
             )}
-            <ErrorBox error={err} title={setup ? "Setup failed" : "Sign-in failed"} />
-            <button className="btn primary block" disabled={busy} style={{ height: 40 }}>
-              {setup ? <Sparkles /> : <LogIn />} {busy ? "Please wait…" : setup ? "Create organization" : "Sign in"}
+            <InlineError error={err} />
+            <button className="btn dark block" disabled={busy} style={{ height: 36 }}>
+              {busy ? <Spinner label="Please wait" /> : setup ? "Create organization" : "Sign in"}
             </button>
           </form>
         )}
-        <p className="faint tiny mt16" style={{ marginBottom: 0 }}>{BRAND.legal}</p>
+        <p className="tiny faint" style={{ margin: "20px 0 0" }}>{BRAND.legal}</p>
       </div>
-    </div>
+    </main>
   );
 }

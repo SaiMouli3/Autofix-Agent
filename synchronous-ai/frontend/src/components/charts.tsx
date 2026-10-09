@@ -1,98 +1,90 @@
-/** Lightweight SVG/CSS charts. Values are always real records passed in by the caller. */
+/** Charts answer specific questions; each has a title, units, labelled axes and a data table. */
+import { useId } from "react";
 
-export interface Series {
-  key: string;
-  label: string;
-  color: string;
+export interface Series { key: string; label: string; color: string }
+
+function niceMax(v: number) {
+  if (v <= 0) return 1;
+  const p = Math.pow(10, Math.floor(Math.log10(v)));
+  const n = v / p;
+  return (n <= 1 ? 1 : n <= 2 ? 2 : n <= 5 ? 5 : 10) * p;
 }
 
-export function StackedBars({ data, series, xKey, format = (v: number) => String(v), height = 140 }: {
-  data: Record<string, any>[];
-  series: Series[];
-  xKey: string;
-  format?: (v: number) => string;
-  height?: number;
+export function BarChart({ data, xKey, series, yLabel, xLabel, format = (v) => v.toLocaleString(), height = 180, stacked = true }: {
+  data: Record<string, any>[]; xKey: string; series: Series[]; yLabel: string; xLabel: string;
+  format?: (v: number) => string; height?: number; stacked?: boolean;
 }) {
-  if (!data.length) return <div className="faint small" style={{ padding: "40px 0", textAlign: "center" }}>No data in this period yet.</div>;
+  const id = useId();
+  if (!data.length) return <p className="muted small">No data in this period.</p>;
+  const W = 640, H = height, L = 52, R = 8, T = 10, B = 34;
   const totals = data.map((d) => series.reduce((s, x) => s + (Number(d[x.key]) || 0), 0));
-  const max = Math.max(1, ...totals);
-  const step = Math.ceil(data.length / 8);
+  const max = niceMax(Math.max(...(stacked ? totals : data.flatMap((d) => series.map((s) => Number(d[s.key]) || 0)))));
+  const bw = (W - L - R) / data.length;
+  const y = (v: number) => T + (H - T - B) * (1 - v / max);
+  const ticks = [0, max / 2, max];
+  const step = Math.ceil(data.length / 7);
   return (
-    <div>
-      {series.length > 1 && (
-        <div className="legend mb8">
-          {series.map((s) => (
-            <span key={s.key}><i style={{ background: s.color }} />{s.label}</span>
-          ))}
-        </div>
-      )}
-      <div className="bars" style={{ height }} role="img" aria-label="bar chart">
-        {data.map((d, i) => (
-          <div className="bar-col" key={i}>
-            <div className="tip">
-              <b>{String(d[xKey])}</b>
-              {series.map((s) => (
-                <div key={s.key}>{s.label}: {format(Number(d[s.key]) || 0)}</div>
-              ))}
-            </div>
-            {[...series].reverse().map((s) => {
-              const v = Number(d[s.key]) || 0;
-              return <div key={s.key} className="seg-bar" style={{ height: `${(v / max) * 100}%`, background: s.color }} />;
-            })}
-          </div>
+    <figure style={{ margin: 0 }}>
+      {series.length > 1 && <div className="legend" aria-hidden>{series.map((s) => <span key={s.key}><i style={{ background: s.color }} />{s.label}</span>)}</div>}
+      <svg className="chart" viewBox={`0 0 ${W} ${H}`} role="img" aria-labelledby={`${id}-d`}>
+        <desc id={`${id}-d`}>{`${yLabel} by ${xLabel}; see the data table below.`}</desc>
+        {ticks.map((t) => (
+          <g key={t}>
+            <line className="grid-line" x1={L} x2={W - R} y1={y(t)} y2={y(t)} />
+            <text x={L - 6} y={y(t) + 3.5} textAnchor="end">{format(t)}</text>
+          </g>
         ))}
-      </div>
-      <div className="axis">
-        {data.map((d, i) => (
-          <span key={i}>{i % step === 0 ? String(d[xKey]).slice(5) : ""}</span>
-        ))}
-      </div>
-    </div>
+        {data.map((d, i) => {
+          let acc = 0;
+          const x0 = L + i * bw + bw * 0.2, w = Math.max(2, bw * 0.6);
+          return (
+            <g key={i}>
+              {series.map((s, si) => {
+                const v = Number(d[s.key]) || 0;
+                if (!v) return null;
+                const sw = stacked ? w : w / series.length;
+                const sx = stacked ? x0 : x0 + si * sw;
+                const top = stacked ? y(acc + v) : y(v);
+                const h = stacked ? y(acc) - y(acc + v) : y(0) - y(v);
+                if (stacked) acc += v;
+                return <rect key={s.key} x={sx} y={top} width={sw} height={Math.max(h, 1)} fill={s.color} rx={1.5}><title>{`${d[xKey]} · ${s.label}: ${format(v)}`}</title></rect>;
+              })}
+              {i % step === 0 && <text x={x0 + w / 2} y={H - B + 14} textAnchor="middle">{String(d[xKey]).slice(5)}</text>}
+            </g>
+          );
+        })}
+        <text className="axis-title" x={12} y={(H - B) / 2} transform={`rotate(-90 12 ${(H - B) / 2})`} textAnchor="middle">{yLabel}</text>
+        <text className="axis-title" x={(W + L) / 2} y={H - 4} textAnchor="middle">{xLabel}</text>
+      </svg>
+      <DataTable rows={data} cols={[{ key: xKey, label: xLabel }, ...series.map((s) => ({ key: s.key, label: s.label, format }))]} />
+    </figure>
   );
 }
 
-export function HBars({ rows, format = (v: number) => String(v) }: { rows: { label: string; value: number; sub?: string }[]; format?: (v: number) => string }) {
-  if (!rows.length) return <div className="faint small">No data yet.</div>;
+export function DataTable({ rows, cols }: { rows: Record<string, any>[]; cols: { key: string; label: string; format?: (v: number) => string }[] }) {
+  return (
+    <details className="data">
+      <summary>View data table</summary>
+      <table className="table mt8">
+        <thead><tr>{cols.map((c) => <th key={c.key} scope="col">{c.label}</th>)}</tr></thead>
+        <tbody>{rows.map((r, i) => <tr key={i}>{cols.map((c) => <td key={c.key} className="num">{c.format && typeof r[c.key] === "number" ? c.format(r[c.key]) : String(r[c.key] ?? "—")}</td>)}</tr>)}</tbody>
+      </table>
+    </details>
+  );
+}
+
+export function HBars({ rows, format = (v) => v.toLocaleString(), unit }: { rows: { label: string; value: number }[]; format?: (v: number) => string; unit?: string }) {
+  if (!rows.length) return <p className="muted small">No data in this period.</p>;
   const max = Math.max(1, ...rows.map((r) => r.value));
   return (
-    <div>
+    <div role="list">
       {rows.map((r) => (
-        <div className="hbar" key={r.label}>
+        <div className="hbar" key={r.label} role="listitem" aria-label={`${r.label}: ${format(r.value)}${unit ? ` ${unit}` : ""}`}>
           <span className="ellipsis" title={r.label}>{r.label}</span>
-          <div className="track"><div className="fill" style={{ width: `${(r.value / max) * 100}%` }} /></div>
-          <span className="right faint">{format(r.value)}</span>
+          <div className="track" aria-hidden><div className="fill" style={{ width: `${(r.value / max) * 100}%` }} /></div>
+          <span className="right num muted">{format(r.value)}</span>
         </div>
       ))}
-    </div>
-  );
-}
-
-export function Donut({ parts, size = 120 }: { parts: { label: string; value: number; color: string }[]; size?: number }) {
-  const total = parts.reduce((s, p) => s + p.value, 0);
-  const r = size / 2 - 10;
-  const c = 2 * Math.PI * r;
-  let offset = 0;
-  return (
-    <div className="row" style={{ gap: 18 }}>
-      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} role="img" aria-label="distribution">
-        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--surface-0)" strokeWidth={14} />
-        {total > 0 &&
-          parts.map((p) => {
-            const len = (p.value / total) * c;
-            const el = (
-              <circle key={p.label} cx={size / 2} cy={size / 2} r={r} fill="none" stroke={p.color} strokeWidth={14}
-                strokeDasharray={`${len} ${c - len}`} strokeDashoffset={-offset} transform={`rotate(-90 ${size / 2} ${size / 2})`} />
-            );
-            offset += len;
-            return el;
-          })}
-        <text x="50%" y="50%" textAnchor="middle" dy="0.35em" fill="var(--text)" fontSize="20" fontWeight="700">{total}</text>
-      </svg>
-      <div className="stack" style={{ gap: 6 }}>
-        {parts.map((p) => (
-          <div key={p.label} className="small row"><i style={{ width: 10, height: 10, borderRadius: 3, background: p.color, display: "inline-block" }} />{p.label}<span className="faint">{p.value}</span></div>
-        ))}
-      </div>
     </div>
   );
 }

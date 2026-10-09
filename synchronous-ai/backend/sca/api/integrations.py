@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from sca.api.deps import Principal, require, scoped
 from sca.db import get_db
+from sca.agent_config import AgentConfig
 from sca.models import Agent, AgentVersion, AuditEvent, Integration, Secret
 from sca.services import audit
 from sca.services.integrations import (
@@ -24,18 +25,27 @@ from sca.services.secrets import put_secret
 
 router = APIRouter(prefix="/api/integrations", tags=["integrations"])
 
+CATEGORIES = ("business_api", "developer_tools", "database", "communication", "documents", "other")
+Category = Literal["business_api", "developer_tools", "database", "communication", "documents", "other"]
+
 
 class IntegrationIn(BaseModel):
     name: str = Field(min_length=2, max_length=80, pattern=r"^[A-Za-z0-9][A-Za-z0-9 _.\-]*$")
     description: str = Field(default="", max_length=2000)
     type: Literal["http", "mcp"]
+    category: Category = "business_api"
     config: dict[str, Any]
     credential: str | None = Field(default=None, max_length=4000)
 
 
 class IntegrationUpdate(BaseModel):
     description: str | None = Field(default=None, max_length=2000)
+    category: Category | None = None
     config: dict[str, Any] | None = None
+
+
+class PermittedAgentsIn(BaseModel):
+    agent_ids: list[str] = Field(default_factory=list, max_length=500)
 
 
 class CredentialIn(BaseModel):
@@ -63,7 +73,8 @@ def _permitted_agents(db: Session, org_id: str, integ_id: str) -> list[dict]:
 
 def _out(db: Session, i: Integration, detail: bool = False) -> dict:
     sec = db.get(Secret, i.secret_id) if i.secret_id else None
-    out = {"id": i.id, "name": i.name, "description": i.description, "type": i.type, "status": i.status,
+    out = {"id": i.id, "name": i.name, "description": i.description, "type": i.type, "category": i.category,
+           "status": i.status,
            "config": i.config, "has_credential": sec is not None, "credential_fingerprint": sec.fingerprint if sec else None,
            "health": i.health, "last_success_at": i.last_success_at, "created_at": i.created_at,
            "updated_at": i.updated_at, "approved_by": i.approved_by,
@@ -94,8 +105,8 @@ def create_integration(body: IntegrationIn, p: Principal = Depends(require("inte
         cfg = validate_config(body.type, body.config)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(422, str(exc)) from exc
-    i = Integration(org_id=p.org_id, name=body.name, description=body.description, type=body.type, config=cfg,
-                    status="proposed", created_by=p.user_id)
+    i = Integration(org_id=p.org_id, name=body.name, description=body.description, type=body.type,
+                    category=body.category, config=cfg, status="proposed", created_by=p.user_id)
     db.add(i)
     db.flush()
     if body.credential:
@@ -118,6 +129,8 @@ def update_integration(integration_id: str, body: IntegrationUpdate,
     i = scoped(db, Integration, integration_id, p, "integration")
     if body.description is not None:
         i.description = body.description
+    if body.category is not None:
+        i.category = body.category
     if body.config is not None:
         try:
             new = validate_config(i.type, body.config)
@@ -178,6 +191,63 @@ def disable(integration_id: str, p: Principal = Depends(require("integrations:wr
     audit.record(db, p.org_id, "integration.disabled", actor_id=p.user_id, target_type="integration", target_id=i.id)
     db.commit()
     return _out(db, i)
+
+
+@router.put("/{integration_id}/agents")
+def set_permitted_agents(integration_id: str, body: PermittedAgentsIn,
+                         p: Principal = Depends(require("integrations:write")), db: Session = Depends(get_db)):
+    """Grant or revoke this integration for agents. Each changed agent gets a new config version."""
+    if not p.can("agents:write"):
+        raise HTTPException(403, "changing agent permissions requires agents:write")
+    i = scoped(db, Integration, integration_id, p, "integration")
+    wanted = set(body.agent_ids)
+    for aid in wanted:
+        scoped(db, Agent, aid, p, "agent")
+    changed: list[str] = []
+    for a in db.execute(select(Agent).where(Agent.org_id == p.org_id)).scalars():
+        ver = db.execute(select(AgentVersion).where(AgentVersion.agent_id == a.id,
+                                                    AgentVersion.version == a.current_version)).scalar_one()
+        cfg = dict(ver.config)
+        current = list(cfg.get("integrations") or [])
+        has = i.id in current
+        if (a.id in wanted) == has:
+            continue
+        if a.id in wanted:
+            current.append(i.id)
+            tools = set(cfg.get("tools") or [])
+            if i.type == "http":
+                tools.add("integrations")
+            cfg["tools"] = sorted(tools)
+        else:
+            current.remove(i.id)
+        cfg["integrations"] = current
+        new_cfg = AgentConfig.model_validate(cfg).model_dump()
+        a.current_version += 1
+        db.add(AgentVersion(agent_id=a.id, version=a.current_version, config=new_cfg, created_by=p.user_id,
+                            change_note=f"{'granted' if a.id in wanted else 'revoked'} integration {i.name}"))
+        changed.append(a.name)
+    audit.record(db, p.org_id, "integration.permissions_changed", actor_id=p.user_id, target_type="integration",
+                 target_id=i.id, details={"agents": sorted(wanted), "changed": changed})
+    db.commit()
+    return _out(db, i, detail=True)
+
+
+@router.delete("/{integration_id}")
+def delete_integration(integration_id: str, p: Principal = Depends(require("integrations:write")),
+                       db: Session = Depends(get_db)):
+    i = scoped(db, Integration, integration_id, p, "integration")
+    users = _permitted_agents(db, p.org_id, i.id)
+    if users:
+        raise HTTPException(409, f"revoke access first: still assigned to {', '.join(a['name'] for a in users)}")
+    if i.secret_id:
+        sec = db.get(Secret, i.secret_id)
+        if sec is not None:
+            db.delete(sec)
+    db.delete(i)
+    audit.record(db, p.org_id, "integration.deleted", actor_id=p.user_id, target_type="integration",
+                 target_id=integration_id, details={"name": i.name})
+    db.commit()
+    return {"ok": True}
 
 
 @router.post("/import/openapi")

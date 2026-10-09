@@ -427,3 +427,58 @@ def test_concurrent_audit_appends_do_not_deadlock_and_keep_the_chain(admin):
     assert not errors, errors
     assert time.time() - t0 < 10, "appends were serialized behind a lock timeout"
     assert admin.get("/api/audit/verify").json()["valid"] is True
+
+
+def test_task_listing_sort_filters_and_failure_category(admin, offline_provider):
+    from sca.api.tasks import error_category
+
+    a = make_agent(admin, offline_provider, "Sorter")
+    with session_scope() as db:
+        agent = db.get(Agent, a["id"])
+        for i, (status, err) in enumerate([("failed", {"code": "rate_limited"}), ("timed_out", {"code": "timeout"}),
+                                           ("completed", None)]):
+            db.add(Task(org_id=agent.org_id, agent_id=agent.id, agent_version=1, title=f"t{i}", instructions="x",
+                        status=status, error=err, priority=i + 1, scheduled_for=utcnow() + timedelta(hours=1)))
+    r = admin.get(f"/api/tasks?agent_id={a['id']}&sort=priority&order=asc").json()
+    assert [t["title"] for t in r["items"]] == ["t0", "t1", "t2"]
+    cats = {t["title"]: t["error_category"] for t in r["items"]}
+    assert cats == {"t0": "provider", "t1": "timeout", "t2": None}
+    r = admin.get(f"/api/tasks?agent_id={a['id']}&status=failed,timed_out").json()
+    assert r["total"] == 2
+    future = (utcnow() + timedelta(days=1)).isoformat()
+    assert admin.get("/api/tasks", params={"agent_id": a["id"], "created_after": future}).json()["total"] == 0
+    past = (utcnow() - timedelta(days=1)).isoformat()
+    assert admin.get("/api/tasks", params={"agent_id": a["id"], "created_after": past}).json()["total"] == 3
+    assert admin.get("/api/tasks?sort=bogus").status_code == 422
+    assert error_category({"code": "budget_exceeded"}, "failed") == "limit"
+    assert error_category(None, "cancelled") == "cancelled"
+
+
+def test_integration_category_permissions_and_delete(admin, offline_provider):
+    a = make_agent(admin, offline_provider, "Integrator")
+    i = admin.post("/api/integrations", {"name": "ticketing", "type": "http", "category": "communication",
+                                         "config": {"base_url": "https://example.com"}}).json()
+    assert i["category"] == "communication"
+    r = admin.put(f"/api/integrations/{i['id']}/agents", {"agent_ids": [a["id"]]})
+    assert r.status_code == 200 and [x["name"] for x in r.json()["permitted_agents"]] == ["Integrator"]
+    cfg = admin.get(f"/api/agents/{a['id']}").json()
+    assert i["id"] in cfg["config"]["integrations"] and "integrations" in cfg["config"]["tools"]
+    assert cfg["current_version"] == 2
+    assert admin.delete(f"/api/integrations/{i['id']}").status_code == 409  # still assigned
+    assert admin.put(f"/api/integrations/{i['id']}/agents", {"agent_ids": []}).status_code == 200
+    assert admin.delete(f"/api/integrations/{i['id']}").status_code == 200
+    assert admin.get(f"/api/integrations/{i['id']}").status_code == 404
+
+
+def test_document_listing_and_preview(admin):
+    src = admin.post("/api/knowledge/sources", {"name": "Preview Source"}).json()
+    doc = admin.post(f"/api/knowledge/sources/{src['id']}/text", {"title": "guide", "content": "Step one. Step two."}).json()
+    for _ in range(30):
+        if admin.get(f"/api/knowledge/documents?source_id={src['id']}").json()["items"][0]["status"] == "indexed":
+            break
+        time.sleep(0.3)
+    listing = admin.get("/api/knowledge/documents?q=guide").json()
+    item = next(d for d in listing["items"] if d["id"] == doc["id"])
+    assert item["uploaded_by_name"] == "Ada Admin" and item["source_name"] == "Preview Source" and item["type"] == "md"
+    pv = admin.get(f"/api/knowledge/documents/{doc['id']}/preview").json()
+    assert "Step one" in pv["passages"][0]["text"]

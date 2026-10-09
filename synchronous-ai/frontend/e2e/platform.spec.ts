@@ -14,7 +14,9 @@ const VIEWER = { email: "e2e-viewer@acme-e2e.com", password: "Viewer-Pass-1234!"
 
 test.describe.configure({ mode: "serial" });
 
-const fieldSelect = (page: Page, label: string) => page.locator("label.field").filter({ hasText: new RegExp(`^${label}`) }).locator("select").first();
+/** The <select> inside a form field whose required-label text is exactly `label`. */
+const fieldSelect = (page: Page, label: string) =>
+  page.locator("label.field", { has: page.locator("span.req", { hasText: new RegExp(`^${label}$`) }) }).locator("select").first();
 
 async function csrf(page: Page) {
   return (await page.context().cookies()).find((c) => c.name === "sca_csrf")?.value ?? "";
@@ -43,61 +45,69 @@ test("full multi-agent acceptance flow", async ({ page, baseURL }) => {
   await page.getByLabel("Email").fill(ADMIN.email);
   await page.getByLabel("Password").fill(ADMIN.password);
   await page.getByRole("button", { name: "Create organization" }).click();
-  await expect(page.getByRole("heading", { name: /Good to see you, Erin/ })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
 
   // 3a. Configure the model provider through Settings and run a real connection test.
   await page.goto("/settings");
   await page.getByRole("button", { name: "Add provider" }).click();
-  await page.getByLabel("API key").fill(KEY);
-  await page.getByLabel("Default model").fill(MODEL);
-  await page.getByRole("button", { name: "Save provider" }).click();
+  const dlg = page.getByRole("dialog", { name: "Add model provider" });
+  await dlg.getByLabel("API key").fill(KEY);
+  await dlg.getByLabel("Default model").fill(MODEL);
+  await dlg.getByRole("button", { name: "Save" }).click();
+  await expect(dlg).toHaveCount(0);
   await page.getByRole("button", { name: "Test connection" }).click();
-  await expect(page.getByText("Connection verified")).toBeVisible({ timeout: 90_000 });
+  await expect(page.getByText(/connection verified with a live request/)).toBeVisible({ timeout: 90_000 });
+  await expect(page.getByText("Connected", { exact: true }).first()).toBeVisible();
 
-  // 2-4. Create an agent with the wizard: identity (template), model, tools.
+  // 2-4. Create an agent with the wizard: template, identity, model, tools, approvals, review.
   const createAgent = async (name: string, template: string, tools: string[]) => {
     await page.goto("/agents/new");
     await page.getByRole("button", { name: new RegExp(template) }).click();
     await page.getByLabel("Agent name").fill(name);
-    await page.getByRole("button", { name: "Continue" }).click(); // -> role
+    await page.getByRole("button", { name: "Continue" }).click(); // -> instructions
     await page.getByRole("button", { name: "Continue" }).click(); // -> model
     await fieldSelect(page, "Model").selectOption(MODEL);
     await page.getByRole("button", { name: "Continue" }).click(); // -> tools
     for (const t of ["Terminal", "File operations", "Task planner", "Content search", "File finder", "Company knowledge search"]) {
       const card = page.getByRole("checkbox", { name: new RegExp(`^.{0,2}${t}`) });
       const want = tools.includes(t);
-      if ((await card.count()) && (await card.getAttribute("aria-checked")) !== String(want)) await card.click();
+      if ((await card.count()) && (await card.getAttribute("aria-checked")) !== String(want)) {
+        await card.click();
+        const allow = page.getByRole("dialog").getByRole("button", { name: "Allow" });
+        if (await allow.isVisible().catch(() => false)) await allow.click(); // risky-tool confirmation
+      }
     }
     await page.getByRole("button", { name: "Continue" }).click(); // -> knowledge
-    await page.getByRole("button", { name: "Continue" }).click(); // -> policies
-    await page.getByLabel("Approval requirement").selectOption("never");
+    await page.getByRole("button", { name: "Continue" }).click(); // -> permissions
+    await page.getByRole("radio", { name: /No runtime approvals/ }).click();
+    const remove = page.getByRole("dialog").getByRole("button", { name: "Remove approvals" });
+    if (await remove.isVisible().catch(() => false)) await remove.click();
     await page.getByRole("button", { name: "Continue" }).click(); // -> review
     await page.getByRole("button", { name: "Create agent" }).click();
-    await expect(page.getByRole("heading", { name })).toBeVisible();
-    return page.url().split("/agents/")[1].split("/")[0];
+    // Success is only shown after the backend confirms: the app then navigates to the new agent's workspace.
+    await page.waitForURL(/\/agents\/[0-9a-f]{32}(\?|$)/);
+    await expect(page.getByRole("heading", { name, level: 1 })).toBeVisible();
+    return page.url().split("/agents/")[1].split(/[/?]/)[0];
   };
   const coderId = await createAgent("E2E Coder", "Software Engineering Agent", ["Terminal", "File operations"]);
 
-  // 5. Configuration persists (reload and read it back from the server).
-  await page.reload();
-  await page.getByRole("tab", { name: /Tools & settings/ }).click();
+  // 5. Configuration persists (reload the settings page and read it back from the server).
+  await page.goto(`/agents/${coderId}/settings`);
   await page.getByRole("button", { name: "Model", exact: true }).click();
   await expect(fieldSelect(page, "Model")).toHaveValue(MODEL);
   const persisted = await (await page.request.get(`/api/agents/${coderId}`)).json();
   expect(persisted.config.tools.sort()).toEqual(["file_editor", "terminal"]);
 
-  // 6-9. Submit a task in the chat UI, watch live events, verify the saved result.
-  await page.getByRole("tab", { name: /Chat & tasks/ }).click();
-  await page.getByLabel("Task instructions").fill("Create squares.py that prints the squares of 1..5 on one line separated by spaces, run it with python3 and report the exact output.");
-  await page.getByRole("button", { name: "Start task" }).click();
-  await expect(page.getByText("Task queued")).toBeVisible();
-  const first = (await (await page.request.get(`/api/tasks?agent_id=${coderId}`)).json()).items[0];
-  await page.goto(`/tasks/${first.id}`);
+  // 6-9. Submit a task in the agent workspace, watch live events, verify the saved result.
+  await page.goto(`/agents/${coderId}`);
+  await page.getByLabel("Task instructions for E2E Coder").fill("Create squares.py that prints the squares of 1..5 on one line separated by spaces, run it with python3 and report the exact output.");
+  await page.getByRole("button", { name: "Run", exact: true }).click();
   await expect(page.locator(".tl-item").filter({ hasText: /terminal|file_editor/ }).first()).toBeVisible({ timeout: 180_000 });
+  const first = (await (await page.request.get(`/api/tasks?agent_id=${coderId}`)).json()).items[0];
   const done = await waitTask(page, first.id);
   expect(done.status).toBe("completed");
-  await page.reload();
-  await page.getByRole("tab", { name: /Result/ }).click();
+  await page.goto(`/tasks/${first.id}`);
+  await page.getByRole("tab", { name: /Instructions & result/ }).click();
   await expect(page.getByText(/1 4 9 16 25/).first()).toBeVisible();
 
   // 10-12. A second agent; both execute separate tasks concurrently; histories stay accessible.
@@ -111,7 +121,7 @@ test("full multi-agent acceptance flow", async ({ page, baseURL }) => {
   expect(rb.status).toBe("completed");
   expect(ra.started_at < rb.finished_at && rb.started_at < ra.finished_at).toBeTruthy();
   for (const id of [coderId, writerId]) {
-    await page.goto(`/agents/${id}/history`);
+    await page.goto(`/tasks?agent=${id}`);
     await expect(page.locator("table.table tbody tr").first()).toBeVisible();
   }
 
