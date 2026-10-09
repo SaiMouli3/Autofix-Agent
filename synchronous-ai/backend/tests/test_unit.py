@@ -315,3 +315,45 @@ def test_oauth_client_id_format_checks():
         assert e.value.code == "client_id_format"
     with pytest.raises(oauth.OAuthError, match="client secret was pasted"):
         oauth.set_client(None, integ, "GOCSPX-abc123", "s", "u1")
+
+
+def test_oauth_preflight_reports_vendor_errors_in_app(monkeypatch):
+    """Vendor error responses captured from Google, Salesforce and Microsoft are reported before the
+    browser is sent to the vendor; ordinary sign-in pages pass through."""
+    import httpx
+
+    from sca.services import oauth
+
+    def responder(status=200, location="", body="", ctype="text/html"):
+        headers = {"content-type": ctype, **({"location": location} if location else {})}
+        return lambda *a, **k: httpx.Response(status, headers=headers, text=body)
+
+    def check(resp):
+        monkeypatch.setattr(httpx, "get", resp)
+        oauth.preflight("https://vendor.example/authorize?client_id=x")
+
+    # Google: the exact error from a real report ("Client missing a project id.").
+    check_err = "https://accounts.google.com/signin/oauth/error?authError=Cg5pbnZhbGlkX2NsaWVudBIcQ2xpZW50IG1pc3NpbmcgYSBwcm9qZWN0IGlkLiAw&flowName=GeneralOAuthFlow"
+    with pytest.raises(oauth.OAuthError, match="Client missing a project id"):
+        check(responder(302, check_err))
+    # Google redirect_uri_mismatch names the URL to register.
+    mismatch = "https://accounts.google.com/signin/oauth/error?authError=ChVyZWRpcmVjdF91cmlfbWlzbWF0Y2gSAA"
+    with pytest.raises(oauth.OAuthError, match="Register exactly .*/api/oauth/callback"):
+        check(responder(302, mismatch))
+    # Salesforce: 400 with a form-encoded body and no content type.
+    with pytest.raises(oauth.OAuthError, match="client identifier invalid"):
+        check(responder(400, body="error=invalid_client_id&error_description=client%20identifier%20invalid", ctype=""))
+    # Microsoft: configuration errors are reported, "not signed in yet" (50058) is not.
+    monkeypatch.setattr(httpx, "get", responder(200, body='{"sErrorCode":"700016"}'))
+    with pytest.raises(oauth.OAuthError, match="no application with this client ID"):
+        oauth.preflight("https://login.microsoftonline.com/t/oauth2/v2.0/authorize?client_id=x")
+    monkeypatch.setattr(httpx, "get", responder(200, body='{"sErrorCode":"50058"}'))
+    oauth.preflight("https://login.microsoftonline.com/t/oauth2/v2.0/authorize?client_id=x")
+    # Normal sign-in redirects, consent pages and unreachable vendors pass through.
+    check(responder(302, "https://accounts.google.com/v3/signin/identifier?x=1"))
+    check(responder(200, body="<h1>Allow access?</h1>"))
+
+    def down(*a, **k):
+        raise httpx.ConnectError("unreachable")
+
+    check(down)

@@ -545,7 +545,7 @@ function OAuthPanel({ i, write, onChanged }: { i: any; write: boolean; onChanged
   const [client, setClient] = useState({ client_id: "", client_secret: "" });
   const saveClient = useMutation({ mutationFn: () => api.put(`/api/integrations/${i.id}/oauth/client`, { client_id: client.client_id.trim(), client_secret: client.client_secret.trim() || null }),
     onSuccess: () => { setEditing(false); setClient({ client_id: "", client_secret: "" }); onChanged(); toast("ok", "Client credentials stored encrypted"); }, onError: (e: any) => toast("error", e.message) });
-  const start = useMutation({ mutationFn: () => api.post(`/api/integrations/${i.id}/oauth/start`), onSuccess: (r) => window.location.assign(r.authorize_url), onError: (e: any) => toast("error", e.message) });
+  const start = useMutation({ mutationFn: () => api.post(`/api/integrations/${i.id}/oauth/start`), onSuccess: (r) => window.location.assign(r.authorize_url) });
   const disconnect = useMutation({ mutationFn: () => api.post(`/api/integrations/${i.id}/oauth/disconnect`), onSuccess: (r) => { onChanged(); toast("ok", r.vendor_revoked ? "Disconnected and the provider revoked the token" : "Disconnected. The provider did not confirm revocation; revoke the app's access there if needed."); }, onError: (e: any) => toast("error", e.message) });
   return (
     <section className="panel" style={{ padding: 12, background: "var(--surface-2)" }} aria-label="Sign-in">
@@ -562,6 +562,7 @@ function OAuthPanel({ i, write, onChanged }: { i: any; write: boolean; onChanged
           </div>
         )}
       </div>
+      {start.error && !start.isPending && <div className="mt8"><Alert kind="error">{(start.error as any).message}</Alert></div>}
       <div className="mt8">
         <KV items={[
           ["Callback URL", <CopyText key="cb" value={o.redirect_uri} />],

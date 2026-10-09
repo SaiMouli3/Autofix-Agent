@@ -70,6 +70,13 @@ ID ends in `.apps.googleusercontent.com`; the platform rejects other values on s
 the `GOCSPX-…` secret pasted into the ID field). Google's "Error 401: invalid_client" page means it
 does not recognize the client ID: copy it again from the Credentials page.
 
+**Pre-flight check:** before sending the browser to the provider, **Connect** asks the provider's
+authorize endpoint about the request. If the provider rejects the client (Google `invalid_client` /
+"Client missing a project id", Salesforce `invalid_client_id`, Microsoft AADSTS700016/50059) or the
+callback URL (`redirect_uri_mismatch`), the error and the fix are shown in the sign-in panel and the
+browser never leaves the platform. Problems a provider only reports after login (for example a
+Microsoft redirect mismatch) still appear on its page.
+
 Under the hood:
 
 - **PKCE S256:** every authorization uses PKCE.

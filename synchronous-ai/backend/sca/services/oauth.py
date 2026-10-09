@@ -22,7 +22,7 @@ import secrets
 import threading
 from datetime import timedelta
 from typing import Any
-from urllib.parse import urlencode, urlparse
+from urllib.parse import parse_qsl, urlencode, urlparse
 
 import httpx
 from sqlalchemy import select
@@ -116,12 +116,19 @@ def status(db: Session, integ: Integration) -> dict[str, Any]:
 # Client ID shapes for vendors whose IDs are well known, to catch paste mistakes (the secret in the
 # ID field, a project ID, stray quotes) before the vendor answers with an opaque invalid_client page.
 _CLIENT_ID_FORMATS = {
-    "accounts.google.com": (re.compile(r"^\d+-[a-z0-9]+\.apps\.googleusercontent\.com$"),
+    "accounts.google.com": (re.compile(r"^\d+(-[a-z0-9]+)?\.apps\.googleusercontent\.com$"),
                             "A Google OAuth client ID looks like 1234567890-abc123.apps.googleusercontent.com "
                             "(Google Cloud Console → APIs & Services → Credentials → OAuth 2.0 Client IDs)."),
     "login.microsoftonline.com": (re.compile(r"^[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$"),
                                   "A Microsoft Entra client ID is the Application (client) ID GUID from the app registration."),
 }
+
+
+def _check_client_id(o: dict[str, Any], client_id: str) -> None:
+    fmt = _CLIENT_ID_FORMATS.get(urlparse(o.get("authorize_url", "")).hostname or "")
+    if fmt and not fmt[0].match(client_id):
+        hint = " It looks like the client secret was pasted into the client ID field." if client_id.startswith("GOCSPX-") else ""
+        raise OAuthError("client_id_format", f"That is not a valid client ID for this provider.{hint} {fmt[1]}")
 
 
 def _clean(value: str) -> str:
@@ -131,11 +138,7 @@ def _clean(value: str) -> str:
 def set_client(db: Session, integ: Integration, client_id: str, client_secret: str | None, user_id: str) -> None:
     """Store the vendor app's client credentials. Changing them discards existing tokens."""
     client_id, client_secret = _clean(client_id), _clean(client_secret or "")
-    o = oauth_settings(integ) or {}
-    fmt = _CLIENT_ID_FORMATS.get(urlparse(o.get("authorize_url", "")).hostname or "")
-    if fmt and not fmt[0].match(client_id):
-        hint = " It looks like the client secret was pasted into the client ID field." if client_id.startswith("GOCSPX-") else ""
-        raise OAuthError("client_id_format", f"That is not a valid client ID for this provider.{hint} {fmt[1]}")
+    _check_client_id(oauth_settings(integ) or {}, client_id)
     save_bundle(db, integ, {"client_id": client_id, "client_secret": client_secret}, user_id)
 
 
@@ -153,6 +156,7 @@ def start(db: Session, integ: Integration, user_id: str) -> str:
     b = load_bundle(db, integ)
     if not b.get("client_id"):
         raise OAuthError("client_missing", "enter the OAuth client ID first")
+    _check_client_id(o, b["client_id"])
     try:
         check_url(o["authorize_url"])
     except BlockedTarget as exc:
@@ -170,7 +174,102 @@ def start(db: Session, integ: Integration, user_id: str) -> str:
     if o.get("pkce", True):
         params.update(code_challenge=challenge, code_challenge_method="S256")
     sep = "&" if urlparse(o["authorize_url"]).query else "?"
-    return o["authorize_url"] + sep + urlencode(params)
+    url = o["authorize_url"] + sep + urlencode(params)
+    preflight(url)
+    return url
+
+
+def _pb_strings(raw: bytes) -> dict[int, str]:
+    """Top-level length-delimited string fields of a protobuf message (enough for Google's authError)."""
+    out: dict[int, str] = {}
+    i = 0
+
+    def varint() -> int:
+        nonlocal i
+        shift = val = 0
+        while i < len(raw):
+            b = raw[i]
+            i += 1
+            val |= (b & 0x7F) << shift
+            if not b & 0x80:
+                return val
+            shift += 7
+        raise ValueError("truncated varint")
+
+    while i < len(raw):
+        key = varint()
+        field, wire = key >> 3, key & 7
+        if wire == 0:
+            varint()
+        elif wire == 2:
+            n = varint()
+            chunk, i = raw[i:i + n], i + n
+            if field not in out:
+                out[field] = chunk.decode("utf-8", "replace")
+        elif wire == 5:
+            i += 4
+        elif wire == 1:
+            i += 8
+        else:
+            break
+    return out
+
+
+_MS_ERRORS = {
+    "700016": "Microsoft Entra has no application with this client ID in that tenant. Check the Application (client) ID and the tenant.",
+    "50011": "The callback URL is not registered on the Entra app registration.",
+    "900971": "The callback URL is not registered on the Entra app registration.",
+    "50059": "Microsoft could not resolve the app or tenant (AADSTS50059). Check the tenant ID and the Application (client) ID.",
+    "90002": "Microsoft could not find the tenant. Use your tenant ID or domain, or 'organizations'.",
+    "700054": "The app registration does not allow this response type.",
+}
+
+
+def _explain(code: str, message: str) -> str:
+    cb = redirect_uri()
+    if code == "redirect_uri_mismatch" or "redirect" in code:
+        return (f"The provider rejected the callback URL. Register exactly {cb} as an authorized redirect URI "
+                f"on the OAuth client, then click Connect again.")
+    if code in ("invalid_client", "invalid_client_id", "deleted_client", "unauthorized_client"):
+        return (f"The provider does not accept this OAuth client ({message or code}). Copy the client ID of a "
+                f"'Web application' OAuth client from the provider's console and save it again. For Google: "
+                f"Google Cloud Console → APIs & Services → Credentials, in the project where the API is enabled.")
+    return f"The provider refused the sign-in request: {message or code}."
+
+
+def preflight(url: str) -> None:
+    """Ask the vendor's authorize endpoint about this request before sending the browser there, so a
+    misconfigured client is reported in the app instead of on a vendor error page. Unreachable or
+    unrecognized responses are not treated as errors."""
+    try:
+        r = httpx.get(url, follow_redirects=False, timeout=10, headers={"Accept": "text/html"})
+    except httpx.HTTPError:
+        return
+    loc = r.headers.get("location", "")
+    if "/signin/oauth/error" in loc:  # Google
+        q = dict(parse_qsl(urlparse(loc).query))
+        try:
+            ae = q.get("authError", "")
+            f = _pb_strings(base64.urlsafe_b64decode(ae + "=" * (-len(ae) % 4)))
+        except (ValueError, TypeError):
+            f = {}
+        raise OAuthError("vendor_rejected", _explain(f.get(1, "error"), f.get(2, "").strip()))
+    if loc.startswith(redirect_uri()) and "error=" in loc:  # vendor bounced straight back with an error
+        q = dict(parse_qsl(urlparse(loc).query))
+        raise OAuthError("vendor_rejected", _explain(q.get("error", "error"), q.get("error_description", "")))
+    if r.status_code < 400 and "login.microsoftonline.com" not in url:
+        return
+    text = r.text[:200_000]
+    m = re.search(r'"sErrorCode":"(\d+)"', text)  # Microsoft renders errors into its sign-in page
+    if m and m.group(1) in _MS_ERRORS:  # only configuration errors; e.g. 50058 just means "not signed in yet"
+        raise OAuthError("vendor_rejected", _MS_ERRORS[m.group(1)])
+    if r.status_code >= 400:
+        if text.startswith("error="):  # form-encoded error body (Salesforce)
+            q = dict(parse_qsl(text.strip()))
+            raise OAuthError("vendor_rejected", _explain(q.get("error", "error"), q.get("error_description", "")))
+        m = re.search(r'"error"\s*:\s*"([a-z_]+)"', text) or re.search(r"\berror=([a-z_]+)", text)
+        if m:
+            raise OAuthError("vendor_rejected", _explain(m.group(1), ""))
 
 
 def _token_request(o: dict[str, Any], data: dict[str, str]) -> dict[str, Any]:
