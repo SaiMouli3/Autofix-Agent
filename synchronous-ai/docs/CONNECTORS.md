@@ -12,10 +12,10 @@
 Tiles show the vendor's logo from Simple Icons (CC0). The logos are bundled with the app, nothing is
 fetched from vendors, and they appear only to identify the service. Brands whose owners asked for
 removal from Simple Icons (Salesforce, Microsoft, Slack) get a neutral monogram instead; see
-THIRD_PARTY_LICENSES.md. Slack, Microsoft and Salesforce each require permission to use their logos: an
-App Directory listing, a trademark license and written permission respectively. Once you hold it,
-drop the official file into `frontend/src/assets/brand-logos/<connector_key>.svg` (see the README
-there) and rebuild. The app then uses it in place of the monogram. Choosing a connector creates
+THIRD_PARTY_LICENSES.md. Slack, Microsoft and Salesforce each require permission to use their logos. This
+deployment holds that permission, so their official files are bundled from
+`frontend/src/assets/brand-logos/`; the README there lists the sources. Any file dropped there
+(`<connector_key>.svg` or `.png`) replaces the built-in icon after a rebuild. Choosing a connector creates
 an integration from its vetted definition. Every connector
 is added as **proposed**. An administrator then attaches the credential, runs **Test connection**
 (a live request to the vendor), reviews which operations are enabled, assigns agents and activates it.

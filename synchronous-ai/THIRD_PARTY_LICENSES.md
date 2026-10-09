@@ -67,5 +67,7 @@ Zendesk and others. They are shown only to identify the service a connector conn
 not imply endorsement or affiliation. Each owner's brand guidelines apply; Simple Icons links them
 per icon. Brands whose owners asked Simple Icons to remove their marks (for example Salesforce,
 Microsoft and Slack) are deliberately not shown, and use a neutral monogram instead.
-Deployments that hold permission can add the official files themselves; see
-`frontend/src/assets/brand-logos/README.md`. No such files are distributed in this repository.
+The Salesforce, Slack and Microsoft 365 logos in `frontend/src/assets/brand-logos/` are included
+with the repository owner's permission from those companies. They are unmodified vendor files; see
+the README in that folder for sources. Anyone redistributing this code needs their own permission,
+or must remove those files.

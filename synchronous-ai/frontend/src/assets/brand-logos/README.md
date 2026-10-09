@@ -16,3 +16,16 @@ Only add a logo when your organization may use it:
 
 Don't recolor, crop or modify the files. Keep a record of the permission next to your
 deployment, not in this repository.
+
+## Files in this folder
+
+The repository owner confirmed on 2026-10-09 that the organization has permission to use these
+marks. Each file was downloaded unmodified from the vendor's own servers:
+
+| File | Source |
+|---|---|
+| `salesforce.svg` | `https://c1.sfdcstatic.com/content/dam/sfdc-docs/www/logos/logo-salesforce.svg` (Salesforce CDN) |
+| `slack.png` | `https://a.slack-edge.com/80588/marketing/img/meta/slack_hash_256.png` (Slack CDN) |
+| `microsoft_365.svg` | `https://res.cdn.office.net/files/fabric-cdn-prod_20230815.002/assets/brand-icons/product/svg/m365_48x1.svg` (Microsoft Fluent UI brand icons) |
+
+If you redistribute this code, make sure the recipient has their own permission, or remove these files.
