@@ -77,6 +77,118 @@ def _secret_name(integ: Integration) -> str:
     return f"integration:{integ.id}"
 
 
+# Organization-wide sign-in apps: one OAuth client per provider, registered once by an admin, so
+# every user just clicks Connect (as with Claude's own connectors). An integration may still carry
+# its own client, which takes precedence.
+PROVIDERS: dict[str, dict[str, Any]] = {
+    "github": {"name": "GitHub", "hosts": ("github.com",), "authorize_host": "github.com",
+               "console_url": "https://github.com/settings/applications/new",
+               "steps": "GitHub → Settings → Developer settings → OAuth Apps → New OAuth App. Homepage URL: this "
+                        "platform's address. Authorization callback URL: the callback URL shown here. Register, then "
+                        "copy the Client ID and generate a client secret. For an organization, create it under the "
+                        "organization's settings instead."},
+    "google": {"name": "Google", "hosts": ("accounts.google.com",), "authorize_host": "accounts.google.com",
+               "console_url": "https://console.cloud.google.com/apis/credentials",
+               "steps": "Google Cloud Console: enable the Gmail, Calendar and Drive APIs, configure the OAuth consent "
+                        "screen, then Credentials → Create credentials → OAuth client ID → Web application with the "
+                        "callback URL shown here as an authorized redirect URI."},
+    "microsoft": {"name": "Microsoft", "hosts": ("login.microsoftonline.com",), "authorize_host": "login.microsoftonline.com",
+                  "console_url": "https://entra.microsoft.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade",
+                  "steps": "Microsoft Entra → App registrations → New registration. Add a Web redirect URI with the "
+                           "callback URL shown here, then Certificates & secrets → New client secret. Use the "
+                           "Application (client) ID and the secret value."},
+    "salesforce": {"name": "Salesforce", "hosts": ("salesforce.com",), "authorize_host": "login.salesforce.com",
+                   "console_url": "https://login.salesforce.com/",
+                   "steps": "Salesforce Setup → External Client App Manager → New. Enable OAuth with the callback URL "
+                            "shown here, the api and refresh_token scopes, and PKCE. Use the Consumer Key and Secret."},
+    "slack": {"name": "Slack", "hosts": ("slack.com",), "authorize_host": "slack.com",
+              "console_url": "https://api.slack.com/apps",
+              "steps": "api.slack.com/apps → Create New App → OAuth & Permissions: add the callback URL shown here "
+                       "as a redirect URL and the bot scopes listed on the connector. Use the Client ID and Secret."},
+}
+
+
+def provider_of(o: dict[str, Any] | None) -> str:
+    """The sign-in app provider for an OAuth config: declared, or inferred from the authorize host
+    (so integrations created before providers were declared still resolve)."""
+    if not o:
+        return ""
+    if o.get("provider") in PROVIDERS:
+        return o["provider"]
+    host = (urlparse(o.get("authorize_url", "")).hostname or "").lower()
+    for key, p in PROVIDERS.items():
+        if any(host == h or host.endswith("." + h) for h in p["hosts"]):
+            return key
+    return ""
+
+
+def _app_secret_name(provider: str) -> str:
+    return f"oauth_app:{provider}"
+
+
+def org_app(db: Session, org_id: str, provider: str) -> dict[str, str]:
+    sec = db.execute(select(Secret).where(Secret.org_id == org_id, Secret.name == _app_secret_name(provider))).scalar_one_or_none()
+    if sec is None:
+        return {}
+    try:
+        app = json.loads(read_secret(db, sec.id, org_id) or "{}")
+    except json.JSONDecodeError:
+        return {}
+    return app if isinstance(app, dict) and app.get("client_id") else {}
+
+
+def deployment_app(provider: str) -> dict[str, str]:
+    app = get_settings().oauth_clients.get(provider) or {}
+    register_secret(app.get("client_secret"))
+    return app if app.get("client_id") else {}
+
+
+def client_for(db: Session, integ: Integration, bundle: dict[str, Any] | None = None) -> tuple[str, str, str]:
+    """(client_id, client_secret, source) where source is integration | organization | deployment | ''."""
+    b = load_bundle(db, integ) if bundle is None else bundle
+    if b.get("client_id"):
+        return b["client_id"], b.get("client_secret", ""), "integration"
+    provider = provider_of(oauth_settings(integ))
+    if provider:
+        for source, app in (("organization", org_app(db, integ.org_id, provider)), ("deployment", deployment_app(provider))):
+            if app:
+                return app["client_id"], app.get("client_secret", ""), source
+    return "", "", ""
+
+
+def list_apps(db: Session, org_id: str) -> list[dict[str, Any]]:
+    out = []
+    for key, p in PROVIDERS.items():
+        org, dep = org_app(db, org_id, key), deployment_app(key)
+        app = org or dep
+        out.append({"provider": key, "name": p["name"], "configured": bool(app),
+                    "source": "organization" if org else "deployment" if dep else "",
+                    "client_id_hint": (app.get("client_id", "")[:8] + "…") if app else "",
+                    "has_secret": bool(app.get("client_secret")) if app else False,
+                    "console_url": p["console_url"], "steps": p["steps"], "redirect_uri": redirect_uri()})
+    return out
+
+
+def set_org_app(db: Session, org_id: str, provider: str, client_id: str, client_secret: str, user_id: str) -> None:
+    if provider not in PROVIDERS:
+        raise OAuthError("unknown_provider", "unknown sign-in provider")
+    client_id, client_secret = _clean(client_id), _clean(client_secret or "")
+    _check_client_id({"authorize_url": f"https://{PROVIDERS[provider]['authorize_host']}/"}, client_id)
+    if not client_secret:
+        raise OAuthError("client_secret_missing", "enter the client secret too")
+    register_secret(client_secret)
+    put_secret(db, org_id, _app_secret_name(provider), "oauth_app",
+               json.dumps({"client_id": client_id, "client_secret": client_secret}), user_id)
+
+
+def delete_org_app(db: Session, org_id: str, provider: str) -> bool:
+    sec = db.execute(select(Secret).where(Secret.org_id == org_id, Secret.name == _app_secret_name(provider))).scalar_one_or_none()
+    if sec is None:
+        return False
+    db.delete(sec)
+    return True
+
+
 def load_bundle(db: Session, integ: Integration) -> dict[str, Any]:
     raw = read_secret(db, integ.secret_id, integ.org_id)
     if not raw:
@@ -98,10 +210,13 @@ def save_bundle(db: Session, integ: Integration, bundle: dict[str, Any], user_id
 def status(db: Session, integ: Integration) -> dict[str, Any]:
     """Display-safe connection state (never tokens or the client secret)."""
     b = load_bundle(db, integ)
+    cid, _, source = client_for(db, integ, b)
     return {
         "redirect_uri": redirect_uri(),
-        "client_configured": bool(b.get("client_id")),
-        "client_id_hint": (b.get("client_id") or "")[:6] + "…" if b.get("client_id") else "",
+        "client_configured": bool(cid),
+        "client_source": source,
+        "client_id_hint": cid[:6] + "…" if cid else "",
+        "provider": provider_of(oauth_settings(integ)),
         "connected": bool(b.get("access_token")),
         "has_refresh_token": bool(b.get("refresh_token")),
         "expires_at": b.get("expires_at"),
@@ -153,10 +268,12 @@ def start(db: Session, integ: Integration, user_id: str) -> str:
     o = oauth_settings(integ)
     if o is None:
         raise OAuthError("not_oauth", "this integration does not use OAuth")
-    b = load_bundle(db, integ)
-    if not b.get("client_id"):
-        raise OAuthError("client_missing", "enter the OAuth client ID first")
-    _check_client_id(o, b["client_id"])
+    client_id, _, _ = client_for(db, integ)
+    if not client_id:
+        name = PROVIDERS.get(provider_of(o), {}).get("name", "this provider")
+        raise OAuthError("client_missing", f"Sign-in with {name} is not set up yet. An administrator adds the "
+                                           f"{name} sign-in app once (Settings → Sign-in apps), then everyone can connect.")
+    _check_client_id(o, client_id)
     try:
         check_url(o["authorize_url"])
     except BlockedTarget as exc:
@@ -167,7 +284,7 @@ def start(db: Session, integ: Integration, user_id: str) -> str:
     db.add(OAuthState(id=hashlib.sha256(state.encode()).hexdigest(), org_id=integ.org_id, integration_id=integ.id,
                       user_id=user_id, verifier=crypto.encrypt(verifier), redirect_uri=redirect_uri(),
                       created_at=now, expires_at=now + STATE_TTL))
-    params = {"response_type": "code", "client_id": b["client_id"], "redirect_uri": redirect_uri(), "state": state,
+    params = {"response_type": "code", "client_id": client_id, "redirect_uri": redirect_uri(), "state": state,
               **(o.get("extra_authorize_params") or {})}
     if o.get("scopes"):
         params["scope"] = (o.get("scope_separator") or " ").join(o["scopes"])
@@ -267,9 +384,13 @@ def preflight(url: str) -> None:
         if text.startswith("error="):  # form-encoded error body (Salesforce)
             q = dict(parse_qsl(text.strip()))
             raise OAuthError("vendor_rejected", _explain(q.get("error", "error"), q.get("error_description", "")))
-        m = re.search(r'"error"\s*:\s*"([a-z_]+)"', text) or re.search(r"\berror=([a-z_]+)", text)
-        if m:
-            raise OAuthError("vendor_rejected", _explain(m.group(1), ""))
+        if "json" in r.headers.get("content-type", ""):  # never guess from HTML pages
+            try:
+                body = r.json()
+            except ValueError:
+                body = {}
+            if isinstance(body, dict) and isinstance(body.get("error"), str):
+                raise OAuthError("vendor_rejected", _explain(body["error"], str(body.get("error_description", ""))))
 
 
 def _token_request(o: dict[str, Any], data: dict[str, str]) -> dict[str, Any]:
@@ -338,10 +459,10 @@ def complete(db: Session, state: str, code: str, user_id: str, org_id: str) -> I
     if integ is None or o is None:
         raise OAuthError("invalid_state", "the integration no longer uses OAuth")
     bundle = load_bundle(db, integ)
-    data = {"grant_type": "authorization_code", "code": code, "redirect_uri": row.redirect_uri,
-            "client_id": bundle.get("client_id", "")}
-    if bundle.get("client_secret"):
-        data["client_secret"] = bundle["client_secret"]
+    client_id, client_secret, _ = client_for(db, integ, bundle)
+    data = {"grant_type": "authorization_code", "code": code, "redirect_uri": row.redirect_uri, "client_id": client_id}
+    if client_secret:
+        data["client_secret"] = client_secret
     if o.get("pkce", True):
         data["code_verifier"] = crypto.decrypt(row.verifier)
     tok = _token_request(o, data)
@@ -386,10 +507,10 @@ def access_token(integ_id: str, *, force_refresh: bool = False, stale_token: str
         if not bundle.get("refresh_token"):
             raise OAuthError("reauthorization_required", "the access token expired and no refresh token was issued; reconnect it")
         o = oauth_settings(integ) or {}
-        data = {"grant_type": "refresh_token", "refresh_token": bundle["refresh_token"],
-                "client_id": bundle.get("client_id", "")}
-        if bundle.get("client_secret"):
-            data["client_secret"] = bundle["client_secret"]
+        client_id, client_secret, _ = client_for(db, integ, bundle)
+        data = {"grant_type": "refresh_token", "refresh_token": bundle["refresh_token"], "client_id": client_id}
+        if client_secret:
+            data["client_secret"] = client_secret
         try:
             tok = _token_request(o, data)
         except OAuthError as exc:
@@ -416,12 +537,19 @@ def disconnect(db: Session, integ: Integration) -> bool:
     token = bundle.get("refresh_token") or bundle.get("access_token")
     if o.get("revoke_url") and token:
         try:
-            check_url(o["revoke_url"])
-            r = httpx.post(o["revoke_url"], data={"token": token}, timeout=15, follow_redirects=False)
+            if o.get("revoke_style") == "github_grant":
+                client_id, client_secret, _ = client_for(db, integ, bundle)
+                url = o["revoke_url"].replace("{client_id}", client_id)
+                check_url(url)
+                r = httpx.request("DELETE", url, json={"access_token": bundle.get("access_token", "")},
+                                  auth=(client_id, client_secret), timeout=15, follow_redirects=False,
+                                  headers={"Accept": "application/vnd.github+json"})
+            else:
+                check_url(o["revoke_url"])
+                r = httpx.post(o["revoke_url"], data={"token": token}, timeout=15, follow_redirects=False)
             revoked = r.status_code < 400
         except (BlockedTarget, httpx.HTTPError):
             revoked = False
-    keep = {k: bundle[k] for k in ("client_id", "client_secret") if bundle.get(k)}
-    if keep:
-        save_bundle(db, integ, keep, None)
+    # Forget the tokens; keep only an integration-specific client, if any.
+    save_bundle(db, integ, {k: bundle[k] for k in ("client_id", "client_secret") if bundle.get(k)}, None)
     return revoked

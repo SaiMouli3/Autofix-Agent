@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 from sca.api.deps import Principal, current_principal, require, scoped
 from sca.db import get_db
 from sca.agent_config import AgentConfig
-from sca.connectors import ConnectorError, instantiate, public_catalog, rank_suggestions
+from sca.connectors import CONNECTORS, ConnectorError, instantiate, public_catalog, rank_suggestions
 from sca.models import Agent, AgentVersion, AuditEvent, Integration, Secret
 from sca.services import audit, oauth
 from sca.services.integrations import (
@@ -125,14 +125,21 @@ def list_connectors(p: Principal = Depends(require("integrations:read")), db: Se
     used: dict[str, list[dict]] = {}
     for i in db.execute(select(Integration).where(Integration.org_id == p.org_id,
                                                   Integration.connector_key.is_not(None))).scalars():
-        used.setdefault(i.connector_key, []).append({"id": i.id, "name": i.name, "status": i.status})
+        entry = {"id": i.id, "name": i.name, "status": i.status}
+        if oauth.oauth_settings(i) is not None:
+            entry["signed_in"] = oauth.status(db, i)["connected"]
+        used.setdefault(i.connector_key, []).append(entry)
     agents = [(a.name, a.category) for a in db.execute(select(Agent).where(Agent.org_id == p.org_id,
                                                                           Agent.status != "disabled")).scalars()]
     suggested = rank_suggestions(agents, set(used))
     order = {k: n for n, k in enumerate(suggested)}
+    configs = {c["key"]: c["config"] for c in CONNECTORS}
+    ready = {a["provider"]: a["configured"] for a in oauth.list_apps(db, p.org_id)}
     for c in items:
         if c.get("auth") == "oauth2":
             c["oauth_redirect_uri"] = oauth.redirect_uri()
+            c["oauth_provider"] = oauth.provider_of(configs[c["key"]].get("oauth"))
+            c["oauth_ready"] = ready.get(c["oauth_provider"], False)
         c["connected"] = used.get(c["key"], [])
         c["suggested_reason"] = suggested.get(c["key"])
         c["suggested_rank"] = order.get(c["key"])
@@ -187,6 +194,40 @@ def _create(db: Session, p: Principal, *, name: str, description: str, kind: str
     audit.record(db, p.org_id, "integration.created", actor_id=p.user_id, target_type="integration", target_id=i.id,
                  details={"name": i.name, "type": i.type, **(details or {})})
     return i
+
+
+class SignInAppIn(BaseModel):
+    client_id: str = Field(min_length=3, max_length=500)
+    client_secret: str = Field(min_length=1, max_length=1000)
+
+
+@router.get("/sign-in-apps")
+def list_sign_in_apps(p: Principal = Depends(require("integrations:read")), db: Session = Depends(get_db)):
+    """Organization-wide OAuth apps (one per provider). Never returns secrets."""
+    return oauth.list_apps(db, p.org_id)
+
+
+@router.put("/sign-in-apps/{provider}")
+def set_sign_in_app(provider: str, body: SignInAppIn, p: Principal = Depends(require("settings:write")),
+                    db: Session = Depends(get_db)):
+    """Register the provider's OAuth app once; every user can then connect with a click."""
+    try:
+        oauth.set_org_app(db, p.org_id, provider, body.client_id, body.client_secret, p.user_id)
+    except oauth.OAuthError as exc:
+        raise HTTPException(422, exc.message) from exc
+    audit.record(db, p.org_id, "oauth_app.set", actor_id=p.user_id, target_type="oauth_app", target_id=provider,
+                 details={"client_id_prefix": body.client_id.strip()[:8]})
+    db.commit()
+    return next(a for a in oauth.list_apps(db, p.org_id) if a["provider"] == provider)
+
+
+@router.delete("/sign-in-apps/{provider}")
+def delete_sign_in_app(provider: str, p: Principal = Depends(require("settings:write")), db: Session = Depends(get_db)):
+    if not oauth.delete_org_app(db, p.org_id, provider):
+        raise HTTPException(404, "no sign-in app is stored for this provider")
+    audit.record(db, p.org_id, "oauth_app.deleted", actor_id=p.user_id, target_type="oauth_app", target_id=provider)
+    db.commit()
+    return {"deleted": True}
 
 
 @router.post("", status_code=201)

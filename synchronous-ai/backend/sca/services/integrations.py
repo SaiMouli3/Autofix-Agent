@@ -88,6 +88,11 @@ class OAuthSettings(BaseModel):
     authorize_url: str
     token_url: str
     revoke_url: str = ""
+    # "rfc7009" posts the token to revoke_url; "github_grant" deletes the app grant with the
+    # client credentials (DELETE /applications/{client_id}/grant).
+    revoke_style: Literal["rfc7009", "github_grant"] = "rfc7009"
+    # Which organization-wide sign-in app supplies the client when the integration has none.
+    provider: str = Field(default="", max_length=40, pattern=r"^[a-z0-9_]*$")
     scopes: list[str] = Field(default_factory=list)
     scope_separator: Literal[" ", ","] = " "  # Slack uses commas
     pkce: bool = True

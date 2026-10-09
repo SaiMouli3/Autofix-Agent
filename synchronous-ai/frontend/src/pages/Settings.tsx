@@ -4,13 +4,14 @@ import { useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { BRAND } from "../brand";
 import { Shell } from "../components/Shell";
+import { SignInAppsSection } from "../components/SignInApps";
 import { Alert, Dialog, Empty, ErrorState, InlineError, KV, Pager, SkeletonRows, Status, Tabs, Tag, useConfirm, useToast } from "../components/ui";
 import { api, qs } from "../lib/api";
 import { fullDateTime, timeAgo } from "../lib/format";
 import { useSession } from "../lib/session";
 import { providerState } from "../lib/status";
 
-type Tab = "providers" | "organization" | "team" | "audit" | "account";
+type Tab = "providers" | "signin" | "organization" | "team" | "audit" | "account";
 
 export default function SettingsPage() {
   const { can } = useSession();
@@ -18,6 +19,7 @@ export default function SettingsPage() {
   const tab = (sp.get("tab") as Tab) || "providers";
   const tabs: { key: Tab; label: string }[] = [
     { key: "providers", label: "Model providers" },
+    { key: "signin", label: "Sign-in apps" },
     { key: "organization", label: "Organization" },
     { key: "team", label: "Team & roles" },
     ...(can("audit:read") ? [{ key: "audit" as Tab, label: "Audit log" }] : []),
@@ -29,6 +31,7 @@ export default function SettingsPage() {
       <Tabs label="Settings sections" value={tab} onChange={(t) => setSp({ tab: t }, { replace: true })} tabs={tabs} />
       <div className="mt16">
         {tab === "providers" && <Providers />}
+        {tab === "signin" && <SignInAppsSection />}
         {tab === "organization" && <Organization />}
         {tab === "team" && <Team />}
         {tab === "audit" && can("audit:read") && <Audit />}

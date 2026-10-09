@@ -495,6 +495,15 @@ _GOOGLE_CLIENT = {
 }
 
 
+# GitHub OAuth App (authorization code + PKCE; GitHub accepts S256 since July 2025). OAuth App tokens
+# do not expire and come without a refresh token; disconnecting deletes the app grant.
+_GITHUB_OAUTH = {"provider": "github",
+                 "authorize_url": "https://github.com/login/oauth/authorize",
+                 "token_url": "https://github.com/login/oauth/access_token",
+                 "revoke_url": "https://api.github.com/applications/{client_id}/grant", "revoke_style": "github_grant",
+                 "scopes": ["repo", "read:user"], "pkce": True}
+
+
 def _google_oauth(scopes: list[str]) -> dict[str, Any]:
     return {"authorize_url": "https://accounts.google.com/o/oauth2/v2/auth",
             "token_url": "https://oauth2.googleapis.com/token",
@@ -924,7 +933,52 @@ CONNECTORS += [
     },
     {
         "key": "github", "name": "GitHub", "vendor": "GitHub", "type": "http", "category": "developer_tools",
-        "summary": "Search and read issues and pull requests across repositories; open issues and comment with approval.",
+        "auth": "oauth2",
+        "summary": "Sign in with GitHub, then search and read issues and pull requests across your repositories; open "
+                   "issues and comment with approval.",
+        "docs_url": "https://docs.github.com/rest",
+        "params": [],
+        "credential": None,
+        "oauth_client": {"label": "GitHub OAuth App",
+                         "help": "Usually set once for the whole organization in Settings → Sign-in apps. GitHub → "
+                                 "Settings → Developer settings → OAuth Apps → New OAuth App, with the callback URL "
+                                 "shown here.",
+                         "scopes": "repo, read:user"},
+        "config": {
+            "base_url": "https://api.github.com",
+            "auth": {"type": "oauth2"},
+            "oauth": _GITHUB_OAUTH,
+            "default_headers": {"Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"},
+            "health_check_path": "/user", "rate_limit_per_min": 80, "timeout_s": 30,
+            "operations": [
+                {"name": "search_issues", "description": "Search issues and PRs, e.g. q='repo:acme/api is:open is:pr "
+                                                         "review-requested:@me'.",
+                 "method": "GET", "path": "/search/issues", "default_query": {"per_page": "30"},
+                 "params_schema": _props(["q"], q=_STR, page={"type": "integer"})},
+                {"name": "list_issues", "description": "Issues of a repository (state=open|closed|all).", "method": "GET",
+                 "path": "/repos/{owner}/{repo}/issues", "default_query": {"per_page": "30", "state": "open"},
+                 "params_schema": _props(["owner", "repo"], owner=_GH, repo=_GH, state=_STR, labels=_STR, page={"type": "integer"})},
+                {"name": "get_issue", "description": "One issue or PR summary.", "method": "GET",
+                 "path": "/repos/{owner}/{repo}/issues/{number}",
+                 "params_schema": _props(["owner", "repo", "number"], owner=_GH, repo=_GH, number=_NUM)},
+                {"name": "list_pull_requests", "description": "Pull requests of a repository.", "method": "GET",
+                 "path": "/repos/{owner}/{repo}/pulls", "default_query": {"per_page": "30", "state": "open"},
+                 "params_schema": _props(["owner", "repo"], owner=_GH, repo=_GH, state=_STR)},
+                {"name": "list_pr_files", "description": "Files changed in a pull request, with patches.", "method": "GET",
+                 "path": "/repos/{owner}/{repo}/pulls/{number}/files",
+                 "params_schema": _props(["owner", "repo", "number"], owner=_GH, repo=_GH, number=_NUM)},
+                {"name": "create_issue", "description": "Open an issue; body {title, body, labels?}. Waits for human approval.",
+                 "method": "POST", "path": "/repos/{owner}/{repo}/issues", "requires_approval": True,
+                 "params_schema": _props(["owner", "repo", "body"], owner=_GH, repo=_GH, body=_OBJ)},
+                {"name": "comment", "description": "Comment on an issue or PR; body {body}. Waits for human approval.",
+                 "method": "POST", "path": "/repos/{owner}/{repo}/issues/{number}/comments", "requires_approval": True,
+                 "params_schema": _props(["owner", "repo", "number", "body"], owner=_GH, repo=_GH, number=_NUM, body=_OBJ)},
+            ],
+        },
+    },
+    {
+        "key": "github_pat", "name": "GitHub (access token)", "vendor": "GitHub", "type": "http", "category": "developer_tools",
+        "summary": "For automation accounts: a fine-grained personal access token instead of sign-in. Search and read issues and pull requests across repositories; open issues and comment with approval.",
         "docs_url": "https://docs.github.com/rest",
         "params": [],
         "credential": {"label": "Fine-grained personal access token",
@@ -1031,6 +1085,7 @@ _GALLERY: dict[str, tuple[str, int, list[str]]] = {
     "zendesk": ("support", 80, ["support"]),
     "jira": ("developer", 85, ["engineering", "operations"]),
     "github": ("developer", 87, ["engineering"]),
+    "github_pat": ("developer", 50, []),
     "github_mcp": ("developer", 70, ["engineering"]),
     "stripe": ("finance", 82, ["finance", "analytics", "sales"]),
     "stripe_mcp": ("finance", 60, ["finance"]),

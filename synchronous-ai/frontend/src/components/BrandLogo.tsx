@@ -31,7 +31,7 @@ const LICENSED: Record<string, string> = Object.fromEntries(
     .map(([path, url]) => [path.split("/").pop()!.replace(/\.(svg|png)$/, ""), url]),
 );
 /** Connectors that share another connector's logo file. */
-const SAME_LOGO: Record<string, string> = { salesforce_mcp: "salesforce", github_mcp: "github", stripe_mcp: "stripe",
+const SAME_LOGO: Record<string, string> = { salesforce_mcp: "salesforce", github_mcp: "github", github_pat: "github", stripe_mcp: "stripe",
   meta_ads_mcp: "meta_marketing", shopify_dev_mcp: "shopify_admin", sap_api_sandbox: "sap_s4hana" };
 
 const MONO_COLORS = ["#C65D32", "#4776A8", "#27845A", "#7A5BA6", "#9A6417", "#2F7F86", "#A04F6B", "#5B615C"];

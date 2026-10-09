@@ -49,6 +49,30 @@ Versions were checked against the vendors' live APIs on 2026-10-09.
 | **Stripe** | HTTP · REST · restricted key | balance, customers, payments, invoices, subscriptions | **read-only by design** |
 | **Stripe MCP** | MCP · `mcp.stripe.com` · restricted key | Stripe's official server, scoped by the key | follows the agent's approval policy |
 
+## Sign-in apps: connect with one click
+
+Like the connectors in Claude or ChatGPT, users connect GitHub, Gmail, Google Calendar and Drive,
+Microsoft 365, Salesforce and Slack by clicking **Connect** and signing in on the provider's own
+page; nobody copies a token or a client ID. This needs the provider's OAuth app registered **once**
+for the organization:
+
+1. An administrator opens **Settings → Sign-in apps**, picks the provider and follows the steps
+   shown (for GitHub: *GitHub → Settings → Developer settings → OAuth Apps → New OAuth App*, with
+   the callback URL shown there).
+2. They paste the app's client ID and secret. The secret is stored encrypted and never shown again.
+3. From then on, **Browse connectors → GitHub → Connect GitHub** goes straight to GitHub's sign-in
+   page and returns connected; the platform verifies the token with a connection test right away.
+   An administrator still approves and activates the integration before agents can use it.
+
+Precedence: a client set on one integration, then the organization's sign-in app, then a
+deployment-wide app from `SCA_OAUTH_CLIENTS` (JSON, see `.env.example`). Removing a sign-in app
+stops new sign-ins; existing connections keep their tokens until they expire or are disconnected.
+
+**GitHub** uses an OAuth App (authorization code + PKCE S256, scopes `repo read:user`). OAuth App
+tokens do not expire and have no refresh token; **Disconnect** deletes the app's grant for that user
+(`DELETE /applications/{client_id}/grant`). For bots and automation accounts, the
+**GitHub (access token)** connector still takes a fine-grained personal access token.
+
 ## One-click sign-in (OAuth 2.0 + PKCE)
 
 Salesforce connectors use the platform's OAuth flow. No token is ever pasted:

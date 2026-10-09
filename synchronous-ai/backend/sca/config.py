@@ -34,6 +34,10 @@ class Settings(BaseSettings):
     public_base_url: str = ""
     cors_origins: Annotated[list[str], NoDecode] = Field(default_factory=lambda: ["http://localhost:5173"])
 
+    # Deployment-wide OAuth sign-in apps, JSON: {"github": {"client_id": "...", "client_secret": "..."}}.
+    # An organization's own app (Settings → Sign-in apps) takes precedence.
+    oauth_clients: dict[str, dict[str, str]] = Field(default_factory=dict)
+
     # Sessions
     session_ttl_hours: int = 12
     cookie_secure: bool = False  # forced True in production

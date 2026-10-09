@@ -3,6 +3,7 @@ import { Blocks, CheckCircle2, ExternalLink, FileJson, KeyRound, Plug, Plus, Pow
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { BrandLogo } from "../components/BrandLogo";
+import { SignInAppForm, useSignInApps } from "../components/SignInApps";
 import { Shell } from "../components/Shell";
 import { Alert, Dialog, Empty, ErrorState, InlineError, KV, SearchField, SkeletonRows, Status, Tabs, Tag, useConfirm, useToast } from "../components/ui";
 import { api } from "../lib/api";
@@ -56,7 +57,10 @@ export default function Integrations() {
     // single when React StrictMode runs effects twice in development.
     if (sp.get("oauth") === "connected" && !oauthHandled.current) {
       oauthHandled.current = true;
-      toast("ok", "Connected. The platform now holds an encrypted, auto-refreshing token. Run a connection test, then activate.");
+      toast("ok", "Connected. The platform now holds an encrypted, auto-refreshing token. Checking the connection…");
+      const id = sp.get("id");
+      // Verify the new token right away so the status reads Connected without another click.
+      if (id && can("integrations:write")) api.post(`/api/integrations/${id}/test`).catch(() => undefined).finally(() => qc.invalidateQueries({ queryKey: ["integrations"] }));
       qc.invalidateQueries({ queryKey: ["integrations"] });
       const n = new URLSearchParams(sp); n.delete("oauth"); setSp(n, { replace: true });
     }
@@ -449,19 +453,36 @@ function ConnectorGallery({ onClose, onCreated, onImport, onCustom }: { onClose:
     const v = (values[p.key] ?? p.default ?? "").trim();
     if (!v) errors[p.key] = `${p.label} is required.`;
   }
+  const { can } = useSession();
+  const apps = useSignInApps();
+  const app = pick?.oauth_provider ? (apps.data ?? []).find((a: any) => a.provider === pick.oauth_provider) : null;
+  const [ownClient, setOwnClient] = useState(false);
+  const oneClick = pick?.auth === "oauth2" && !!pick.oauth_ready && !ownClient;
   const create = useMutation({
     mutationFn: () => api.post(`/api/integrations/connectors/${pick.key}`, {
       params: Object.fromEntries((pick.params ?? []).map((p: any) => [p.key, (values[p.key] ?? p.default ?? "").trim()])),
       credential: credential || null,
       oauth_client: pick.auth === "oauth2" && client.client_id.trim() ? { client_id: client.client_id.trim(), client_secret: client.client_secret.trim() || null } : null,
     }),
-    onSuccess: (i) => {
+    onSuccess: async (i) => {
       qc.invalidateQueries({ queryKey: ["integrations"] });
+      if (i.oauth?.client_configured) {
+        // One click: go straight to the provider's sign-in page; the callback brings the user back connected.
+        try {
+          const r = await api.post(`/api/integrations/${i.id}/oauth/start`);
+          window.location.assign(r.authorize_url);
+          return;
+        } catch (e: any) {
+          toast("error", e.message);
+          onCreated(i.id);
+          return;
+        }
+      }
       toast("ok", i.oauth ? `${i.name} added. Next: Connect (sign in with ${pick.vendor}), test, then activate.` : `${i.name} added as proposed. Run a connection test, review its operations, then activate it.`);
       onCreated(i.id);
     },
   });
-  const choose = (c: any) => { setPick(c); setValues({}); setCredential(""); setClient({ client_id: "", client_secret: "" }); setTouched(false); create.reset(); };
+  const choose = (c: any) => { setPick(c); setValues({}); setCredential(""); setClient({ client_id: "", client_secret: "" }); setOwnClient(false); setTouched(false); create.reset(); };
   if (!pick) {
     return <ConnectorBrowser items={list.data} loading={list.isLoading} error={list.error} onRetry={() => list.refetch()}
       onPick={choose} onClose={onClose} onImport={onImport} onCustom={onCustom} />;
@@ -469,7 +490,8 @@ function ConnectorGallery({ onClose, onCreated, onImport, onCustom }: { onClose:
   return (
     <Dialog size="wide" title={`Connect ${pick.name}`} description={pick.summary} onClose={onClose}
       footer={<><button className="btn" onClick={() => setPick(null)}>Back</button>
-        <button className="btn dark" disabled={create.isPending} onClick={() => { setTouched(true); if (!Object.keys(errors).length) create.mutate(); }}>{create.isPending ? "Adding…" : "Add as proposed"}</button></>}>
+        <button className="btn dark" disabled={create.isPending} onClick={() => { setTouched(true); if (!Object.keys(errors).length) create.mutate(); }}>
+          {create.isPending ? (oneClick ? "Redirecting…" : "Adding…") : oneClick ? `Connect ${pick.vendor}` : "Add as proposed"}</button></>}>
       <div className="stack">
         <div className="row" style={{ gap: 10 }}><BrandLogo connectorKey={pick.key} name={pick.name} vendor={pick.vendor} size={40} />
           <div><b>{pick.name}</b><div className="tiny muted">{pick.vendor} · {pick.type === "mcp" ? "MCP server" : "API"}{pick.auth === "oauth2" ? " · one-click sign-in" : ""}</div></div></div>
@@ -484,7 +506,17 @@ function ConnectorGallery({ onClose, onCreated, onImport, onCustom }: { onClose:
             ))}
           </div>
         )}
-        {pick.auth === "oauth2" && pick.oauth_client && (
+        {oneClick && (
+          <Alert kind="info">Click <b>Connect {pick.vendor}</b> to sign in on {pick.vendor}'s own page. You come back here connected; no
+            token or client ID to copy. Scopes requested: <span className="mono">{pick.oauth_client?.scopes}</span>.{" "}
+            <button className="disclose" onClick={() => setOwnClient(true)}>Use a different OAuth client</button></Alert>
+        )}
+        {pick.auth === "oauth2" && !pick.oauth_ready && app && (can("settings:write")
+          ? <div className="stack tight"><div className="section-title">Set up {app.name} sign-in once for your organization</div>
+              <SignInAppForm app={app} onSaved={() => list.refetch().then((r) => setPick((r.data ?? []).find((c: any) => c.key === pick.key) ?? pick))} /></div>
+          : <Alert kind="warn">{app.name} sign-in isn't set up for your organization yet. Ask an administrator to add it once in
+              Settings → Sign-in apps; then you can connect with one click.</Alert>)}
+        {pick.auth === "oauth2" && pick.oauth_client && (ownClient || (!pick.oauth_ready && !app)) && (
           <div className="stack tight">
             <div className="section-title">Sign-in with {pick.vendor} (OAuth 2.0 + PKCE)</div>
             <p className="small muted" style={{ margin: 0 }}>{pick.oauth_client.help}</p>
@@ -566,7 +598,7 @@ function OAuthPanel({ i, write, onChanged }: { i: any; write: boolean; onChanged
       <div className="mt8">
         <KV items={[
           ["Callback URL", <CopyText key="cb" value={o.redirect_uri} />],
-          ["Client", o.client_configured ? <span key="c" className="mono small">{o.client_id_hint} {write && <button className="disclose" onClick={() => setEditing(!editing)}>Change</button>}</span> : <span key="c" style={{ color: "var(--warning)" }}>Not set</span>],
+          ["Client", o.client_configured ? <span key="c" className="small"><span className="mono">{o.client_id_hint}</span>{o.client_source !== "integration" && <span className="muted"> · organization sign-in app</span>} {write && <button className="disclose" onClick={() => setEditing(!editing)}>{o.client_source === "integration" ? "Change" : "Use a different client"}</button>}</span> : <span key="c" style={{ color: "var(--warning)" }}>Not set up: an administrator adds the sign-in app in Settings → Sign-in apps</span>],
           ...(o.connected ? [
             ["Authorized", o.authorized_at ? fullDateTime(o.authorized_at) : "—"],
             ["Scopes", <span key="s" className="mono small">{o.scope || "as configured"}</span>],
@@ -603,7 +635,7 @@ function ConnectorCard({ c, onPick, reason }: { c: any; onPick: (c: any) => void
         <span className="grow" style={{ minWidth: 0 }}>
           <span className="row between" style={{ gap: 6 }}>
             <b className="small ellipsis">{c.name}</b>
-            {added > 0 && <Tag tone="success">{c.connected.some((x: any) => x.status === "active") ? "Connected" : "Added"}</Tag>}
+            {added > 0 && <Tag tone="success">{c.connected.some((x: any) => x.status === "active" || x.signed_in) ? "Connected" : "Added"}</Tag>}
           </span>
           <span className="tiny muted">{c.vendor} · {c.type === "mcp" ? "MCP server" : "API"}{c.auth === "oauth2" ? " · one-click sign-in" : ""}</span>
         </span>

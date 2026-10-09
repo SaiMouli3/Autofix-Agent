@@ -620,7 +620,10 @@ def test_connector_suggestions_connected_badge_and_ok_field_health(admin, offlin
     i = admin.post(f"/api/integrations/connectors/{first['key']}", {"params": params}).json()
     assert i["connector_key"] == first["key"]
     cat = {c["key"]: c for c in admin.get("/api/integrations/connectors").json()}
-    assert cat[first["key"]]["connected"] == [{"id": i["id"], "name": i["name"], "status": "proposed"}]
+    entry = {"id": i["id"], "name": i["name"], "status": "proposed"}
+    if cat[first["key"]]["auth"] == "oauth2":
+        entry["signed_in"] = False
+    assert cat[first["key"]]["connected"] == [entry]
     assert cat[first["key"]]["suggested_rank"] is None
     admin.delete(f"/api/integrations/{i['id']}")
 
@@ -659,7 +662,7 @@ def test_connector_token_reaches_the_vendor_as_sent(admin):
     srv = ThreadingHTTPServer(("127.0.0.1", 0), _HeaderCapture)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     try:
-        r = admin.post("/api/integrations/connectors/github", {"name": "GitHub capture", "credential": "  ghp_TestToken123\n"})
+        r = admin.post("/api/integrations/connectors/github_pat", {"name": "GitHub capture", "credential": "  ghp_TestToken123\n"})
         assert r.status_code == 201, r.text
         i = r.json()
         cfg = dict(i["config"], base_url=f"http://127.0.0.1:{srv.server_port}")

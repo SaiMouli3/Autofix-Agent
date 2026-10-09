@@ -296,3 +296,130 @@ def test_sap_csrf_handshake_and_if_match(admin, vendor):
         assert out["status"] == 204
     assert [w["path"] for w in vendor.sap_writes] == ["/sap/opu/odata/sap/API_BUSINESS_PARTNER/A_BusinessPartner('1000123')"] * 2
     assert vendor.sap_writes[1]["body"] == {"SearchTerm1": "ACME2"}
+
+
+class _GitHubState:
+    def __init__(self) -> None:
+        self.client = ("Ov23liTestClient01", "gh-client-secret-xyz")
+        self.codes: dict[str, dict] = {}
+        self.tokens: set[str] = set()
+        self.grants_deleted: list[str] = []
+
+
+def _github_handler(st: _GitHubState):
+    """TEST DOUBLE shaped like GitHub's OAuth App endpoints: authorize (auto-consent), token exchange
+    returning JSON with no refresh token, PKCE S256, the REST /user endpoint, and grant deletion with
+    the app's client credentials."""
+
+    class _GitHub(BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def _json(self, code: int, body) -> None:
+            out = json.dumps(body).encode()
+            self.send_response(code)
+            self.send_header("content-type", "application/json")
+            self.send_header("content-length", str(len(out)))
+            self.end_headers()
+            self.wfile.write(out)
+
+        def do_GET(self):
+            u = urlparse(self.path)
+            if u.path == "/login/oauth/authorize":
+                q = {k: v[0] for k, v in parse_qs(u.query).items()}
+                if q.get("client_id") != st.client[0]:
+                    return self._json(404, {"error": "not found"})
+                code = "ghc-" + secrets.token_hex(6)
+                st.codes[code] = {"challenge": q["code_challenge"], "redirect_uri": q["redirect_uri"], "scope": q.get("scope")}
+                self.send_response(302)
+                self.send_header("location", q["redirect_uri"] + "?" + urlencode({"code": code, "state": q["state"]}))
+                self.end_headers()
+                return
+            if u.path == "/user":
+                tok = (self.headers.get("authorization") or "").removeprefix("Bearer ")
+                return self._json(200, {"login": "octocat"}) if tok in st.tokens else self._json(401, {"message": "Bad credentials"})
+            self._json(404, {"message": "Not Found"})
+
+        def do_POST(self):
+            n = int(self.headers.get("content-length", 0))
+            f = {k: v[0] for k, v in parse_qs(self.rfile.read(n).decode()).items()}
+            if urlparse(self.path).path != "/login/oauth/access_token":
+                return self._json(404, {})
+            c = st.codes.pop(f.get("code", ""), None)
+            digest = base64.urlsafe_b64encode(hashlib.sha256(f.get("code_verifier", "").encode()).digest()).rstrip(b"=").decode()
+            if (f.get("client_id"), f.get("client_secret")) != st.client:
+                return self._json(200, {"error": "incorrect_client_credentials"})
+            if not c or digest != c["challenge"] or c["redirect_uri"] != f.get("redirect_uri"):
+                return self._json(200, {"error": "bad_verification_code", "error_description": "The code passed is incorrect or expired."})
+            tok = "gho_" + secrets.token_hex(12)
+            st.tokens.add(tok)
+            self._json(200, {"access_token": tok, "token_type": "bearer", "scope": "repo,read:user"})
+
+        def do_DELETE(self):
+            n = int(self.headers.get("content-length", 0))
+            body = json.loads(self.rfile.read(n) or b"{}")
+            basic = base64.b64encode(f"{st.client[0]}:{st.client[1]}".encode()).decode()
+            if self.path != f"/applications/{st.client[0]}/grant" or self.headers.get("authorization") != f"Basic {basic}":
+                return self._json(401, {"message": "Requires authentication"})
+            st.tokens.discard(body.get("access_token"))
+            st.grants_deleted.append(body.get("access_token"))
+            self.send_response(204)
+            self.end_headers()
+
+    return _GitHub
+
+
+def test_github_one_click_sign_in_with_org_app(admin, server):
+    st = _GitHubState()
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), _github_handler(st))
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{srv.server_port}"
+    try:
+        # A member without settings rights cannot register the org app; an admin does it once.
+        admin.post("/api/users", {"email": "gh-member@acme.com", "name": "Gina Member", "role": "agent_admin", "password": PASSWORD})
+        member = login_as(server, "gh-member@acme.com")
+        assert member.put("/api/integrations/sign-in-apps/github", {"client_id": st.client[0], "client_secret": "x"}).status_code == 403
+        cat = {c["key"]: c for c in member.get("/api/integrations/connectors").json()}
+        assert cat["github"]["auth"] == "oauth2" and cat["github"]["oauth_provider"] == "github" and not cat["github"]["oauth_ready"]
+
+        r = admin.put("/api/integrations/sign-in-apps/github", {"client_id": f'  "{st.client[0]}" ', "client_secret": st.client[1]})
+        assert r.status_code == 200, r.text
+        assert r.json()["configured"] and r.json()["source"] == "organization" and st.client[1] not in r.text
+        apps = member.get("/api/integrations/sign-in-apps").json()
+        assert next(a for a in apps if a["provider"] == "github")["configured"] and st.client[1] not in json.dumps(apps)
+        assert member.get("/api/integrations/connectors").json() and \
+            {c["key"]: c for c in member.get("/api/integrations/connectors").json()}["github"]["oauth_ready"]
+
+        # The member adds GitHub and connects: no client ID or token is ever entered.
+        i = member.post("/api/integrations/connectors/github", {}).json()
+        assert i["oauth"]["client_configured"] and i["oauth"]["client_source"] == "organization"
+        cfg = json.loads(json.dumps(i["config"]).replace("https://github.com", base).replace("https://api.github.com", base))
+        assert member.put(f"/api/integrations/{i['id']}", {"config": cfg}).status_code == 200
+
+        start = member.post(f"/api/integrations/{i['id']}/oauth/start")
+        assert start.status_code == 200, start.text
+        q = parse_qs(urlparse(start.json()["authorize_url"]).query)
+        assert q["client_id"] == [st.client[0]] and q["scope"] == ["repo read:user"] and q["code_challenge_method"] == ["S256"]
+        import httpx
+
+        cb = urlparse(httpx.get(start.json()["authorize_url"], follow_redirects=False).headers["location"])
+        done = member.c.get(f"{cb.path}?{cb.query}", follow_redirects=False)
+        assert done.status_code == 303 and "oauth=connected" in done.headers["location"], done.headers["location"]
+
+        got = member.get(f"/api/integrations/{i['id']}").json()
+        assert got["oauth"]["connected"] and got["oauth"]["scope"] == "repo,read:user"
+        assert not any(t in json.dumps(got) for t in st.tokens)
+        res = member.post(f"/api/integrations/{i['id']}/test").json()["result"]
+        assert res["ok"], res
+
+        # Disconnect deletes the GitHub app grant with the org app's client credentials.
+        out = member.post(f"/api/integrations/{i['id']}/oauth/disconnect").json()
+        assert out["vendor_revoked"] is True and len(st.grants_deleted) == 1 and not st.tokens
+        assert not member.get(f"/api/integrations/{i['id']}").json()["oauth"]["connected"]
+
+        # Removing the org app means nobody can start a new sign-in until it is added again.
+        assert admin.delete("/api/integrations/sign-in-apps/github").status_code == 200
+        r = member.post(f"/api/integrations/{i['id']}/oauth/start")
+        assert r.status_code == 422 and "Settings → Sign-in apps" in r.text
+    finally:
+        srv.shutdown()
