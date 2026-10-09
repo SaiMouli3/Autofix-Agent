@@ -201,6 +201,22 @@ class IntegrationError(Exception):
         self.message = message
 
 
+def _vendor_message(r: httpx.Response) -> str:
+    """A short, redacted error message from a vendor's JSON error body (e.g. GitHub's "Bad credentials")."""
+    try:
+        body = r.json()
+    except ValueError:
+        return ""
+    if isinstance(body, list) and body and isinstance(body[0], dict):
+        body = body[0]
+    if not isinstance(body, dict):
+        return ""
+    msg = body.get("message") or body.get("error_description") or body.get("error")
+    if isinstance(msg, dict):
+        msg = msg.get("message")
+    return redact_text(str(msg))[:160] if msg else ""
+
+
 def _oauth_token(integ: Integration, *, force: bool = False, stale: str | None = None) -> str:
     from sca.services import oauth
 
@@ -570,6 +586,9 @@ def test_connection(db: Session, integ: Integration) -> dict[str, Any]:
                 result["detail"] = f"HTTP {r.status_code} from {redact_text(url)}"
             if r.status_code in (401, 403):
                 result["detail"] += " (authentication rejected)"
+                said = _vendor_message(r)
+                if said:
+                    result["detail"] += f": the provider said '{said}'. Check the credential is current and has the needed scopes."
         else:
             cfg = McpConfig.model_validate(integ.config)
             if cfg.transport == "stdio":

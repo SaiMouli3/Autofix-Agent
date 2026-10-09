@@ -158,6 +158,17 @@ def create_from_connector(key: str, body: ConnectorIn, p: Principal = Depends(re
     return _out(db, i, detail=True)
 
 
+def _normalize_credential(config: dict[str, Any], value: str) -> str:
+    """Undo common paste mistakes: surrounding quotes, and a scheme prefix the gateway adds itself."""
+    v = value.strip().strip("\"'").strip()
+    t = ((config or {}).get("auth") or {}).get("type")
+    if t == "bearer" and v[:7].lower() == "bearer ":
+        v = v[7:].strip()
+    elif t == "basic" and v[:6].lower() == "basic ":
+        v = v[6:].strip()
+    return v
+
+
 def _create(db: Session, p: Principal, *, name: str, description: str, kind: str, category: str,
             config: dict[str, Any], credential: str | None, details: dict[str, Any] | None = None) -> Integration:
     if db.execute(select(Integration).where(Integration.org_id == p.org_id, Integration.name == name)).first():
@@ -171,7 +182,8 @@ def _create(db: Session, p: Principal, *, name: str, description: str, kind: str
     db.add(i)
     db.flush()
     if credential:
-        i.secret_id = put_secret(db, p.org_id, f"integration:{i.id}", "integration", credential, p.user_id).id
+        i.secret_id = put_secret(db, p.org_id, f"integration:{i.id}", "integration",
+                                 _normalize_credential(config, credential), p.user_id).id
     audit.record(db, p.org_id, "integration.created", actor_id=p.user_id, target_type="integration", target_id=i.id,
                  details={"name": i.name, "type": i.type, **(details or {})})
     return i
@@ -220,7 +232,11 @@ def set_credential(integration_id: str, body: CredentialIn, p: Principal = Depen
     i = scoped(db, Integration, integration_id, p, "integration")
     if oauth.oauth_settings(i) is not None:
         raise HTTPException(409, "this integration uses OAuth: set the client credentials and use Connect instead")
-    sec = put_secret(db, p.org_id, f"integration:{i.id}", "integration", body.credential, p.user_id)
+    try:
+        sec = put_secret(db, p.org_id, f"integration:{i.id}", "integration",
+                         _normalize_credential(i.config, body.credential), p.user_id)
+    except ValueError as exc:
+        raise HTTPException(422, "the credential is empty") from exc
     i.secret_id = sec.id
     audit.record(db, p.org_id, "integration.credential_updated", actor_id=p.user_id, target_type="integration",
                  target_id=i.id, details={"fingerprint": sec.fingerprint})

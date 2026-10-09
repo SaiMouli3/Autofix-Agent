@@ -635,3 +635,48 @@ def test_connector_suggestions_connected_badge_and_ok_field_health(admin, offlin
         assert res["ok"] is False and "invalid_auth" in res["detail"]
     finally:
         srv.shutdown()
+
+
+class _HeaderCapture(BaseHTTPRequestHandler):
+    seen: list[dict] = []
+
+    def log_message(self, *a):  # quiet
+        pass
+
+    def do_GET(self):
+        _HeaderCapture.seen.append({"path": self.path, **{k.lower(): v for k, v in self.headers.items()}})
+        good = self.headers.get("authorization", "").startswith("Bearer ghp_")
+        out = b'{"login": "octocat"}' if good else b'{"message": "Bad credentials", "status": "401"}'
+        self.send_response(200 if good else 401)
+        self.send_header("content-type", "application/json")
+        self.send_header("content-length", str(len(out)))
+        self.end_headers()
+        self.wfile.write(out)
+
+
+def test_connector_token_reaches_the_vendor_as_sent(admin):
+    """The token a user pastes is what the vendor receives (GitHub: Authorization: Bearer <token>)."""
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), _HeaderCapture)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        r = admin.post("/api/integrations/connectors/github", {"name": "GitHub capture", "credential": "  ghp_TestToken123\n"})
+        assert r.status_code == 201, r.text
+        i = r.json()
+        cfg = dict(i["config"], base_url=f"http://127.0.0.1:{srv.server_port}")
+        assert admin.put(f"/api/integrations/{i['id']}", {"config": cfg}).status_code == 200
+        res = admin.post(f"/api/integrations/{i['id']}/test").json()["result"]
+        assert res["ok"], res
+        h = _HeaderCapture.seen[-1]
+        assert h["path"] == "/user"
+        assert h["authorization"] == "Bearer ghp_TestToken123"
+        assert h["accept"] == "application/vnd.github+json" and h["x-github-api-version"] == "2022-11-28"
+        # A pasted "Bearer " prefix or quotes are not sent twice.
+        assert admin.post(f"/api/integrations/{i['id']}/credential", {"credential": '"Bearer ghp_Rotated456"'}).status_code == 200
+        assert admin.post(f"/api/integrations/{i['id']}/test").json()["result"]["ok"]
+        assert _HeaderCapture.seen[-1]["authorization"] == "Bearer ghp_Rotated456"
+        # A rejected token surfaces the vendor's own reason.
+        assert admin.post(f"/api/integrations/{i['id']}/credential", {"credential": "github_pat_expired"}).status_code == 200
+        res = admin.post(f"/api/integrations/{i['id']}/test").json()["result"]
+        assert not res["ok"] and "HTTP 401" in res["detail"] and "Bad credentials" in res["detail"]
+    finally:
+        srv.shutdown()
