@@ -24,6 +24,7 @@ import {
 import { createContext, ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
 import { BRAND } from "../brand";
+import { BrandLockup } from "./BrandLockup";
 import { api } from "../lib/api";
 import { timeAgo } from "../lib/format";
 import { useDebounced, usePref } from "../lib/prefs";
@@ -166,11 +167,9 @@ function Sidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => 
   return (
     <aside className="sidebar" aria-label="Primary navigation">
       <div className="side-head">
-        <Link to="/" aria-label={`${BRAND.name} home`} data-tip={collapsed ? BRAND.name : undefined}><img className="brand-mark" src={BRAND.logo} alt="" /></Link>
-        <div className="brand-text grow">
-          <div className="brand-name">{BRAND.name}</div>
-          <div className="brand-org" title={me.org.name}>{me.org.name}</div>
-        </div>
+        <Link to="/" className="grow side-brand" aria-label={`${BRAND.name} home — ${me.org.name}`} title={me.org.name} data-tip={collapsed ? BRAND.name : undefined}>
+          <BrandLockup size={34} markOnly={collapsed} />
+        </Link>
         {!collapsed && <button className="btn ghost icon sm hide-sm" onClick={onToggle} aria-label="Collapse navigation" data-tip="Collapse"><ChevronsLeft /></button>}
       </div>
       <nav className="nav" aria-label="Sections">
@@ -229,7 +228,7 @@ function Sidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => 
             <span className="initials" aria-hidden>{initials}</span>
             <span className="meta grow" style={{ minWidth: 0 }}>
               <div className="small strong ellipsis">{me.user.name}</div>
-              <div className="tiny muted ellipsis">{me.role_label}</div>
+              <div className="tiny muted ellipsis" title={`${me.role_label} · ${me.org.name}`}>{me.role_label} · {me.org.name}</div>
             </span>
           </button>
         )} items={[

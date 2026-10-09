@@ -3,6 +3,7 @@ import { FormEvent, useState } from "react";
 import { CheckCircle2, KeyRound, ScrollText } from "lucide-react";
 import { BRAND } from "../brand";
 import { AuthScene } from "../components/AuthScene";
+import { BrandLockup } from "../components/BrandLockup";
 import { InlineError, Spinner } from "../components/ui";
 import { api } from "../lib/api";
 
@@ -37,10 +38,7 @@ export default function Login() {
   return (
     <main className="auth">
       <section className="auth-hero" aria-label={`${BRAND.name} overview`}>
-        <div className="auth-hero-brand">
-          <img src={BRAND.logo} alt="" width={32} height={32} />
-          <span>{BRAND.name}</span>
-        </div>
+        <div className="auth-hero-brand"><BrandLockup size={46} tone="dark" /></div>
         <div className="auth-hero-copy">
           <h2>Your AI workforce,<br /><em>governed.</em></h2>
           <p>Agents that work across Salesforce, SAP, Slack, Microsoft 365 and 20 more systems. Every change is approved, every action audited.</p>
@@ -54,13 +52,7 @@ export default function Login() {
       </section>
       <section className="auth-side">
         <div className="auth-card">
-          <div className="row auth-card-brand" style={{ gap: 10, marginBottom: 28 }}>
-            <img src={BRAND.logo} alt="" width={30} height={30} />
-            <div>
-              <div className="strong">{BRAND.name}</div>
-              <div className="tiny muted">{BRAND.tagline}</div>
-            </div>
-          </div>
+          <div className="auth-card-brand" style={{ marginBottom: 28 }}><BrandLockup size={42} /></div>
           {status.isLoading ? <Spinner /> : (
             <form className="stack" onSubmit={submit} noValidate={false}>
               <div>

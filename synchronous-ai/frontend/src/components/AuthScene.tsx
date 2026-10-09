@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { BRAND } from "../brand";
 import { BrandLogo } from "./BrandLogo";
 import { BotMark } from "./BotMark";
 
@@ -68,15 +69,7 @@ export function AuthScene() {
           );
         })}
         <Box x={c} y={c} w={104} d={104} h={26} className="hub">
-          <div className="iso-hub-top">
-            <svg viewBox="0 0 32 32" width="40" height="40" aria-hidden>
-              <path d="M16 6a10 10 0 0 1 9.2 6" fill="none" stroke="#fff" strokeWidth="2.6" strokeLinecap="round" />
-              <path d="M25.6 8.5 25.4 12.6 21.4 12" fill="none" stroke="#fff" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" />
-              <path d="M16 26a10 10 0 0 1-9.2-6" fill="none" stroke="#fff" strokeWidth="2.6" strokeLinecap="round" />
-              <path d="M6.4 23.5 6.6 19.4 10.6 20" fill="none" stroke="#fff" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" />
-              <circle cx="16" cy="16" r="2.6" fill="#fff" />
-            </svg>
-          </div>
+          <div className="iso-hub-top"><img src={BRAND.logo} alt="" width={74} height={74} /></div>
         </Box>
         <div className="iso-pulse" style={{ left: c, top: c }} />
         {RING.map((key, i) => {

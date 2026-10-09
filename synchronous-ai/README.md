@@ -97,8 +97,10 @@ docs/      architecture, deployment, security, testing
 scripts/   e2e.sh
 ```
 
-Branding (name, logo, colors, legal line) is centralized in `frontend/src/brand.ts`,
-`frontend/public/logo.svg` and the CSS tokens at the top of `frontend/src/styles.css`.
+Branding is centralized in `frontend/src/brand.ts`: the name, the mark, the two-line
+"SYNCHRONOUS / CONSULTING INC" lockup, and the legal line. The mark and icons are
+Synchronous Consulting Inc's own assets from sync-sap.com, in `frontend/public/brand/`. Colors are
+the CSS tokens at the top of `frontend/src/styles.css`.
 
 ## License and attribution
 

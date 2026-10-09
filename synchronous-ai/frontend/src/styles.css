@@ -508,8 +508,7 @@ button.list-row { width: 100%; border-left: 0; border-right: 0; border-top: 0; b
 .auth-hero::before { content: ""; position: absolute; inset: 0; pointer-events: none; opacity: .5;
   background-image: radial-gradient(rgba(255,255,255,.07) 1px, transparent 1px); background-size: 22px 22px;
   mask-image: radial-gradient(70% 70% at 50% 45%, #000 30%, transparent 100%); }
-.auth-hero-brand { position: relative; display: flex; align-items: center; gap: 10px; font-weight: 600; font-size: 15px; letter-spacing: .01em; z-index: 2; }
-.auth-hero-brand img { border-radius: 8px; box-shadow: 0 0 0 1px rgba(255,255,255,.12); }
+.auth-hero-brand { position: relative; display: flex; align-items: center; z-index: 2; }
 .auth-hero-copy { position: relative; z-index: 2; margin-top: 44px; max-width: 520px; }
 .auth-hero-copy h2 { font-size: clamp(30px, 3.2vw, 44px); line-height: 1.08; letter-spacing: -0.025em; font-weight: 650; margin: 0; color: #fff; }
 .auth-hero-copy h2 em { font-style: normal; color: #f0a37f; }
@@ -590,3 +589,19 @@ button.list-row { width: 100%; border-left: 0; border-right: 0; border-top: 0; b
   .auth-side { padding: 0 16px 24px; }
   .auth-card { padding: 24px; }
 }
+
+/* brand lockup (sync-sap.com) */
+.lockup { display: inline-flex; align-items: center; gap: calc(var(--mark) * 0.3); min-width: 0; }
+.lockup-mark { width: var(--mark); height: var(--mark); border-radius: 50%; object-fit: cover; flex: none; background: #fff; }
+.lockup-text { display: flex; flex-direction: column; min-width: 0; line-height: 1; }
+.lockup-word { font-weight: 600; font-size: calc(var(--mark) * 0.42); letter-spacing: 0.02em; color: #262d29; white-space: nowrap; }
+.lockup-sub { margin-top: calc(var(--mark) * 0.1); font-weight: 400; font-size: calc(var(--mark) * 0.21); letter-spacing: 0.17em; color: #6b706b; white-space: nowrap; }
+.lockup-dark .lockup-word { color: #fff; } .lockup-dark .lockup-sub { color: #aab0a8; }
+.lockup-dark .lockup-mark { box-shadow: 0 0 0 2px rgba(255,255,255,.14); }
+.side-brand { display: flex; min-width: 0; color: inherit; }
+.collapsed .side-brand { flex-grow: 0; }
+.iso-hub-top img { border-radius: 50%; box-shadow: 0 0 0 3px rgba(255,255,255,.55), 0 6px 18px rgba(0,0,0,.35); }
+.user-btn { max-width: 100%; min-width: 0; overflow: hidden; }
+.user-btn .meta { overflow: hidden; display: block; }
+.side-foot .menu-wrap { display: flex; width: 100%; min-width: 0; }
+.user-btn .meta > div { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
