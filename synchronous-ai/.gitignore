@@ -1,0 +1,20 @@
+# Runtime data, secrets and build outputs
+data/
+*.db
+*.db-wal
+*.db-shm
+secret.key
+.env
+.env.*
+!.env.example
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.venv/
+venv/
+node_modules/
+frontend/dist/
+frontend/test-results/
+frontend/playwright-report/
+*.egg-info/
