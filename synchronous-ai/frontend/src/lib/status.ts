@@ -26,6 +26,7 @@ export const STATUS: Record<string, { label: string; tone: Tone; sym: Sym }> = {
   connected: { label: "Connected", tone: "success", sym: "check" },
   disconnected: { label: "Disconnected", tone: "neutral", sym: "minus" },
   misconfigured: { label: "Misconfigured", tone: "warning", sym: "alert" },
+  needs_signin: { label: "Not signed in", tone: "warning", sym: "alert" },
   error: { label: "Error", tone: "danger", sym: "x" },
   untested: { label: "Not tested", tone: "neutral", sym: "circle" },
   proposed: { label: "Awaiting review", tone: "warning", sym: "pause" },
@@ -54,11 +55,13 @@ export const FAILURE: Record<string, { label: string; next: string }> = {
   runtime: { label: "Agent runtime error", next: "Inspect the activity log, then retry." },
 };
 
-export function integrationState(i: any): "connected" | "disconnected" | "misconfigured" | "error" | "untested" | "proposed" {
+export function integrationState(i: any): "connected" | "disconnected" | "misconfigured" | "needs_signin" | "error" | "untested" | "proposed" {
   if (i.status === "disabled") return "disconnected";
   const needsCred = i.oauth ? true : i.type === "http" ? (i.config?.auth?.type ?? "none") !== "none" : false;
   const invalid = (i.validation ?? []).some((c: any) => !c.ok && c.severity === "error");
-  if (invalid || (needsCred && !i.has_credential)) return "misconfigured";
+  if (invalid) return "misconfigured";
+  if (i.oauth && !i.oauth.connected) return "needs_signin";
+  if (needsCred && !i.has_credential) return "misconfigured";
   if (i.health?.checked_at && !i.health.ok) return "error";
   if (i.status === "proposed") return "proposed";
   if (!i.health?.checked_at) return "untested";

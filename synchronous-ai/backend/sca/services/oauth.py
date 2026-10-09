@@ -14,6 +14,7 @@ token to a rolled-back request would disconnect the integration.
 from __future__ import annotations
 
 import base64
+import contextvars
 import hashlib
 import json
 import secrets
@@ -37,6 +38,8 @@ from sca.services.secrets import put_secret, read_secret
 STATE_TTL = timedelta(minutes=10)
 REFRESH_SKEW_S = 60
 _locks: dict[str, threading.Lock] = {}
+# Origin of the current HTTP request, set by the app middleware (development fallback only).
+request_origin: contextvars.ContextVar[str] = contextvars.ContextVar("sca_request_origin", default="")
 _locks_guard = threading.Lock()
 
 
@@ -48,7 +51,11 @@ class OAuthError(Exception):
 
 
 def redirect_uri() -> str:
-    return get_settings().public_base_url.rstrip("/") + "/api/oauth/callback"
+    """Callback URL registered with vendors. Production uses SCA_PUBLIC_BASE_URL only; elsewhere,
+    without it, the browser's own origin, so the callback returns to the host holding the session."""
+    s = get_settings()
+    base = s.public_base_url or ("" if s.is_production else request_origin.get()) or "http://localhost:8000"
+    return base.rstrip("/") + "/api/oauth/callback"
 
 
 def oauth_settings(integ: Integration) -> dict[str, Any] | None:

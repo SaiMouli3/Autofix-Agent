@@ -280,3 +280,22 @@ def test_gmail_compose_and_decode():
     out = _decode_gmail_message(msg)
     assert out["from"] == "Jo <jo@acme.com>" and out["subject"] == "Pricing"
     assert out["body"] == "Hello there" and out["attachments"][0]["filename"] == "quote.pdf"
+
+
+def test_oauth_redirect_uri_sources(monkeypatch):
+    from sca.config import get_settings
+    from sca.services import oauth
+
+    s = get_settings()
+    token = oauth.request_origin.set("http://127.0.0.1:5173")
+    try:
+        monkeypatch.setattr(s, "public_base_url", "")
+        assert oauth.redirect_uri() == "http://127.0.0.1:5173/api/oauth/callback"
+        monkeypatch.setattr(s, "public_base_url", "https://agents.example.com/")
+        assert oauth.redirect_uri() == "https://agents.example.com/api/oauth/callback"
+        # Production never trusts the request's Host header for the callback.
+        monkeypatch.setattr(s, "public_base_url", "")
+        monkeypatch.setattr(s, "env", "production")
+        assert oauth.redirect_uri() == "http://localhost:8000/api/oauth/callback"
+    finally:
+        oauth.request_origin.reset(token)

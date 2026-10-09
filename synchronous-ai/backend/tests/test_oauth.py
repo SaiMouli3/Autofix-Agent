@@ -182,7 +182,10 @@ def test_oauth_connect_refresh_rotation_and_revocation(admin, vendor):
     r = admin.post("/api/integrations", {"name": "SF test double", "type": "http", "config": _salesforce_config(vendor.port)})
     assert r.status_code == 201, r.text
     i = r.json()
-    assert i["oauth"]["connected"] is False and i["oauth"]["redirect_uri"].endswith("/api/oauth/callback")
+    assert i["oauth"]["connected"] is False
+    # No SCA_PUBLIC_BASE_URL outside production: the callback uses the origin the browser is on,
+    # so it lands on the host that holds the session cookie (e.g. the Vite dev server).
+    assert i["oauth"]["redirect_uri"] == str(admin.c.base_url).rstrip("/") + "/api/oauth/callback"
     assert admin.post(f"/api/integrations/{i['id']}/activate").status_code == 422  # not authorized yet
     assert admin.post(f"/api/integrations/{i['id']}/oauth/start").status_code == 422  # no client yet
     assert admin.post(f"/api/integrations/{i['id']}/credential", {"credential": "x" * 20}).status_code == 409

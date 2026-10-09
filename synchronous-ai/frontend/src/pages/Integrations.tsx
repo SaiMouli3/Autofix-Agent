@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Blocks, CheckCircle2, ExternalLink, FileJson, KeyRound, Plug, Plus, Power, ShieldCheck, Trash2, Wand2, X, XCircle } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { BrandLogo } from "../components/BrandLogo";
 import { Shell } from "../components/Shell";
@@ -50,9 +50,12 @@ export default function Integrations() {
   const toast = useToast();
   const qc = useQueryClient();
   const oauthError = sp.get("oauth_error");
+  const oauthHandled = useRef(false);
   useEffect(() => {
-    // Returning from a vendor sign-in (/api/oauth/callback redirects here).
-    if (sp.get("oauth") === "connected") {
+    // Returning from a vendor sign-in (/api/oauth/callback redirects here). The ref keeps the toast
+    // single when React StrictMode runs effects twice in development.
+    if (sp.get("oauth") === "connected" && !oauthHandled.current) {
+      oauthHandled.current = true;
       toast("ok", "Connected. The platform now holds an encrypted, auto-refreshing token. Run a connection test, then activate.");
       qc.invalidateQueries({ queryKey: ["integrations"] });
       const n = new URLSearchParams(sp); n.delete("oauth"); setSp(n, { replace: true });
@@ -213,8 +216,9 @@ function IntegrationDetail({ id, onClose }: { id: string; onClose: () => void })
             </div>
           )}
         </div>
-        {state === "misconfigured" && <Alert kind="warn">{i.oauth && !i.oauth.connected ? "Sign in with the provider (Connect below) before this integration can be used." : needsCred && !i.has_credential ? "A credential is required before this integration can connect." : "The configuration has validation errors (see Checks)."}</Alert>}
-        {i.health?.checked_at && !i.health.ok && <Alert kind="error">Last check {timeAgo(i.health.checked_at)}: {i.health.detail}</Alert>}
+        {state === "needs_signin" && <Alert kind="warn">Not signed in yet. {i.oauth.client_configured ? "Click Connect below to sign in with the provider." : "Enter the OAuth client ID and secret from the provider's developer console below, then click Connect."}</Alert>}
+        {state === "misconfigured" && <Alert kind="warn">{needsCred && !i.has_credential ? "A credential is required before this integration can connect." : "The configuration has validation errors (see Checks)."}</Alert>}
+        {state !== "needs_signin" && i.health?.checked_at && !i.health.ok && <Alert kind="error">Last check {timeAgo(i.health.checked_at)}: {i.health.detail}</Alert>}
         <KV items={[
           ["Endpoint", <span key="e" className="mono">{i.type === "http" ? i.config.base_url : i.config.url || i.config.command}</span>],
           ["Authentication", i.oauth ? AUTH_LABEL.oauth2 : i.type === "http" ? AUTH_LABEL[i.config.auth?.type ?? "none"] : i.has_credential ? `${i.config.auth_header} header` : "None"],

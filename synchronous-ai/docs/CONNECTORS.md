@@ -55,6 +55,9 @@ Salesforce connectors use the platform's OAuth flow. No token is ever pasted:
 
 1. In the vendor, register an app with the **callback URL** shown in the connect dialog. The URL is
    `SCA_PUBLIC_BASE_URL` + `/api/oauth/callback`, so in production it must be your public **https** URL.
+   In local development it defaults to the address in your browser bar, e.g.
+   `http://127.0.0.1:5173/api/oauth/callback`. Register exactly that URL, and keep using the same
+   host (`localhost` and `127.0.0.1` are different hosts to the browser and to the vendor).
 2. Enter the app's client ID and secret. They are stored encrypted.
 3. Click **Connect**. The browser goes to the vendor's login and consent page, then returns to the
    integration signed in.

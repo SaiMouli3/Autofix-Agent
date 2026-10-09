@@ -43,7 +43,9 @@
 - **Refresh:** refreshes are serialized and committed independently, which handles refresh-token
   rotation. `invalid_grant` marks the integration as needing reauthorization instead of retrying forever.
 - **Callback URL:** `SCA_PUBLIC_BASE_URL` determines the registered callback URL. In production it
-  must be the public https origin.
+  must be the public https origin; the request's Host header is never used there. In development,
+  when it is unset, the callback uses the origin the browser is on (for example the Vite dev server
+  at `http://127.0.0.1:5173`), so it returns to the host that holds the session cookie.
 
 ## Agent containment
 

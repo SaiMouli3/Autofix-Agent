@@ -20,6 +20,7 @@ from fastapi.staticfiles import StaticFiles  # noqa: E402
 from sca import __version__  # noqa: E402
 from sca.config import get_settings  # noqa: E402
 from sca.security.ratelimit import limiter  # noqa: E402
+from sca.services import oauth  # noqa: E402
 from sca.security.redaction import redact_text  # noqa: E402
 
 
@@ -91,6 +92,8 @@ def create_app() -> FastAPI:
     async def request_context(request: Request, call_next):
         rid = request.headers.get("x-request-id") or uuid.uuid4().hex[:16]
         path = request.url.path
+        if not s.public_base_url and not s.is_production:
+            oauth.request_origin.set(f"{request.url.scheme}://{request.url.netloc}")
         if path.startswith("/api/") and not path.startswith("/api/hooks/"):
             ip = request.client.host if request.client else "?"
             if not limiter.allow(f"api:{ip}", s.rate_limit_api_per_min):

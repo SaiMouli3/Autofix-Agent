@@ -29,7 +29,9 @@ class Settings(BaseSettings):
 
     # Public base URL of the API as reachable *by agents* (platform MCP server).
     internal_base_url: str = "http://127.0.0.1:8000"
-    public_base_url: str = "http://localhost:8000"
+    # Public origin users open in the browser; OAuth callbacks are built from it. When unset outside
+    # production, the origin of the current request is used, so local dev (Vite proxy) just works.
+    public_base_url: str = ""
     cors_origins: Annotated[list[str], NoDecode] = Field(default_factory=lambda: ["http://localhost:5173"])
 
     # Sessions
