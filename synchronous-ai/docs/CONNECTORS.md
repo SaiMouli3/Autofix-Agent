@@ -63,6 +63,13 @@ Salesforce connectors use the platform's OAuth flow. No token is ever pasted:
    integration signed in.
 4. Run **Test connection**, then **Approve & activate**.
 
+**Google (Gmail, Calendar, Drive):** create the client under *APIs & Services → Credentials → Create
+credentials → OAuth client ID → Web application* in a project where the matching API is enabled,
+and add your account as a test user on the consent screen while the app is in Testing. The client
+ID ends in `.apps.googleusercontent.com`; the platform rejects other values on save (for example
+the `GOCSPX-…` secret pasted into the ID field). Google's "Error 401: invalid_client" page means it
+does not recognize the client ID: copy it again from the Credentials page.
+
 Under the hood:
 
 - **PKCE S256:** every authorization uses PKCE.

@@ -364,7 +364,10 @@ def set_oauth_client(integration_id: str, body: OAuthClientIn, p: Principal = De
                      db: Session = Depends(get_db)):
     """Store the vendor app's client ID/secret (encrypted). Replacing them disconnects the integration."""
     i = _oauth_integration(db, integration_id, p)
-    oauth.set_client(db, i, body.client_id, body.client_secret, p.user_id)
+    try:
+        oauth.set_client(db, i, body.client_id, body.client_secret, p.user_id)
+    except oauth.OAuthError as exc:
+        raise HTTPException(422, exc.message) from exc
     audit.record(db, p.org_id, "integration.oauth_client_set", actor_id=p.user_id, target_type="integration",
                  target_id=i.id, details={"client_id_prefix": body.client_id[:6]})
     db.commit()

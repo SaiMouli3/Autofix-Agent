@@ -17,6 +17,7 @@ import base64
 import contextvars
 import hashlib
 import json
+import re
 import secrets
 import threading
 from datetime import timedelta
@@ -112,9 +113,30 @@ def status(db: Session, integ: Integration) -> dict[str, Any]:
     }
 
 
+# Client ID shapes for vendors whose IDs are well known, to catch paste mistakes (the secret in the
+# ID field, a project ID, stray quotes) before the vendor answers with an opaque invalid_client page.
+_CLIENT_ID_FORMATS = {
+    "accounts.google.com": (re.compile(r"^\d+-[a-z0-9]+\.apps\.googleusercontent\.com$"),
+                            "A Google OAuth client ID looks like 1234567890-abc123.apps.googleusercontent.com "
+                            "(Google Cloud Console → APIs & Services → Credentials → OAuth 2.0 Client IDs)."),
+    "login.microsoftonline.com": (re.compile(r"^[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$"),
+                                  "A Microsoft Entra client ID is the Application (client) ID GUID from the app registration."),
+}
+
+
+def _clean(value: str) -> str:
+    return value.strip().strip("\"'").strip()
+
+
 def set_client(db: Session, integ: Integration, client_id: str, client_secret: str | None, user_id: str) -> None:
     """Store the vendor app's client credentials. Changing them discards existing tokens."""
-    save_bundle(db, integ, {"client_id": client_id.strip(), "client_secret": (client_secret or "").strip()}, user_id)
+    client_id, client_secret = _clean(client_id), _clean(client_secret or "")
+    o = oauth_settings(integ) or {}
+    fmt = _CLIENT_ID_FORMATS.get(urlparse(o.get("authorize_url", "")).hostname or "")
+    if fmt and not fmt[0].match(client_id):
+        hint = " It looks like the client secret was pasted into the client ID field." if client_id.startswith("GOCSPX-") else ""
+        raise OAuthError("client_id_format", f"That is not a valid client ID for this provider.{hint} {fmt[1]}")
+    save_bundle(db, integ, {"client_id": client_id, "client_secret": client_secret}, user_id)
 
 
 def _pkce_pair() -> tuple[str, str]:

@@ -299,3 +299,19 @@ def test_oauth_redirect_uri_sources(monkeypatch):
         assert oauth.redirect_uri() == "http://localhost:8000/api/oauth/callback"
     finally:
         oauth.request_origin.reset(token)
+
+
+def test_oauth_client_id_format_checks():
+    from types import SimpleNamespace
+
+    from sca.connectors import instantiate
+    from sca.services import oauth
+
+    gmail = instantiate("gmail", {})
+    integ = SimpleNamespace(type=gmail["type"], config=gmail["config"])
+    for bad in ("GOCSPX-abc123", "my-project-123", "123-abc.apps.googleusercontent.com.json"):
+        with pytest.raises(oauth.OAuthError) as e:
+            oauth.set_client(None, integ, bad, "s", "u1")  # rejected before anything is stored
+        assert e.value.code == "client_id_format"
+    with pytest.raises(oauth.OAuthError, match="client secret was pasted"):
+        oauth.set_client(None, integ, "GOCSPX-abc123", "s", "u1")
