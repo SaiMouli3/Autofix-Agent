@@ -114,6 +114,7 @@ def test_rbac_enforced_server_side(server, admin, offline_provider):
     operator = login_as(server, "operator@acme.com")
     assert viewer.get("/api/agents").status_code == 200
     assert viewer.post("/api/agents", {"name": "Nope", "config": {}}).status_code == 403
+    assert viewer.delete("/api/agents/0123456789abcdef0123456789abcdef").status_code == 403
     assert viewer.post(f"/api/agents/{agent['id']}/tasks", {"instructions": "x"}).status_code == 403
     assert operator.post("/api/agents", {"name": "Nope", "config": {}}).status_code == 403
     assert operator.post("/api/providers", {"name": "x", "kind": "openai"}).status_code == 403
@@ -155,6 +156,41 @@ def test_agent_versioning_and_validation(admin, offline_provider):
     assert admin.put(f"/api/agents/{a['id']}", {"config": bad}).status_code == 422  # tool not enabled here
     self_deleg = dict(cfg, policy={"delegation": {"allowed_agent_ids": [a["id"]]}})
     assert admin.put(f"/api/agents/{a['id']}", {"config": self_deleg}).status_code == 422
+
+
+def test_delete_agent(admin, offline_provider):
+    from sca.config import get_settings
+    from sca.models import Task
+    from sca.services.tasks import submit_task
+
+    target = make_agent(admin, offline_provider, "Doomed")
+    caller = make_agent(admin, offline_provider, "Caller", policy={"delegation": {"allowed_agent_ids": [target["id"]]}})
+    with session_scope() as db:
+        t, _ = submit_task(db, agent=db.get(Agent, target["id"]), instructions="hold")
+        t.scheduled_for = utcnow() + timedelta(hours=1)  # keep it queued
+        tid, org = t.id, t.org_id
+    ws = get_settings().workspaces_dir / org / target["id"] / "s1" / "project"
+    ws.mkdir(parents=True)
+    (ws / "notes.txt").write_text("scratch")
+
+    # Refused while work is active.
+    r = admin.delete(f"/api/agents/{target['id']}")
+    assert r.status_code == 409 and "Cancel them first" in r.text
+    assert admin.post(f"/api/tasks/{tid}/cancel").status_code == 200
+
+    r = admin.delete(f"/api/agents/{target['id']}")
+    assert r.status_code == 200, r.text
+    assert r.json()["tasks_deleted"] == 1 and r.json()["delegation_updated"] == ["Caller"]
+    assert admin.get(f"/api/agents/{target['id']}").status_code == 404
+    assert admin.delete(f"/api/agents/{target['id']}").status_code == 404
+    with session_scope() as db:
+        assert db.get(Task, tid) is None
+    assert not ws.exists()
+    # The delegating agent got a new version without the deleted target.
+    c = admin.get(f"/api/agents/{caller['id']}").json()
+    assert c["current_version"] == 2 and c["config"]["policy"]["delegation"]["allowed_agent_ids"] == []
+    # The name can be reused.
+    make_agent(admin, offline_provider, "Doomed")
 
 
 def test_idempotent_submission_and_cancel_before_start(admin, offline_provider):

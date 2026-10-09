@@ -16,6 +16,7 @@ import {
   RotateCcw,
   Send,
   Settings2,
+  Trash2,
   X,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -152,6 +153,18 @@ function WorkspaceHeader({ a, state, activeTask, onRun, ctxOpen, onToggleCtx }: 
     onSuccess: (_, s) => { qc.invalidateQueries({ queryKey: ["agents"] }); toast("ok", s === "active" ? `${a.name} activated` : `${a.name} disabled`); },
     onError: (e: any) => toast("error", e.message),
   });
+  const remove = useMutation({
+    mutationFn: () => api.del(`/api/agents/${a.id}`),
+    onSuccess: (r: any) => {
+      nav("/agents", { replace: true });
+      qc.removeQueries({ queryKey: ["agents", a.id] });
+      qc.removeQueries({ queryKey: ["sessions", a.id] });
+      qc.invalidateQueries({ queryKey: ["agents"] });
+      qc.invalidateQueries({ queryKey: ["tasks"] });
+      toast("ok", `${a.name} deleted${r.delegation_updated?.length ? `. Removed from delegation targets of ${r.delegation_updated.join(", ")}` : ""}`);
+    },
+    onError: (e: any) => toast("error", e.message),
+  });
   const cancel = useMutation({
     mutationFn: (id: string) => api.post(`/api/tasks/${id}/cancel`),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["tasks"] }); toast("ok", "Cancellation requested. The agent stops at its next step."); },
@@ -193,6 +206,13 @@ function WorkspaceHeader({ a, state, activeTask, onRun, ctxOpen, onToggleCtx }: 
             if (await confirm({ title: `Disable ${a.name}?`, body: "Queued tasks will not start and nobody can assign new tasks until it is re-activated. Running executions continue. History is kept.", confirmLabel: "Disable", danger: true })) setStatus.mutate("disabled");
           } }
           : { label: "Activate agent", icon: Power, disabled: !can("agents:write"), onSelect: () => setStatus.mutate("active") },
+        { label: "Delete agent", icon: Trash2, danger: true, disabled: !can("agents:write") || remove.isPending, hint: "Requires agent administration rights", onSelect: async () => {
+          if (await confirm({
+            title: `Delete ${a.name} permanently?`,
+            body: "This removes the agent, its configuration versions, task history, schedules and workspace files. It cannot be undone. Usage records and the audit log are kept. Agents with active tasks or pending approvals cannot be deleted; cancel those first, or disable the agent instead to keep its history.",
+            confirmLabel: "Delete agent", danger: true, requireText: a.name,
+          })) remove.mutate();
+        } },
       ]} />
     </header>
   );

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -17,9 +18,11 @@ from sca.models import (
     Agent,
     AgentVersion,
     ApprovalRequest,
+    TASK_ACTIVE_STATES,
     Integration,
     KnowledgeSource,
     ModelProvider,
+    Schedule,
     Task,
     Team,
     User,
@@ -221,6 +224,49 @@ def set_status(agent_id: str, body: StatusIn, p: Principal = Depends(require("ag
     audit.record(db, p.org_id, f"agent.{body.status}", actor_id=p.user_id, target_type="agent", target_id=agent.id)
     db.commit()
     return _agent_out(db, agent)
+
+
+@router.delete("/agents/{agent_id}")
+def delete_agent(agent_id: str, p: Principal = Depends(require("agents:write")), db: Session = Depends(get_db)):
+    """Permanently delete an agent with its versions, tasks, sessions, schedules and workspace files.
+    Refused while it has active tasks or pending approvals. Usage records and the audit log are kept.
+    Other agents that could delegate to it get a new config version without it."""
+    agent = scoped(db, Agent, agent_id, p, "agent")
+    active = db.execute(select(func.count()).select_from(Task)
+                        .where(Task.agent_id == agent.id, Task.status.in_(TASK_ACTIVE_STATES))).scalar_one()
+    pending = db.execute(select(func.count()).select_from(ApprovalRequest)
+                         .where(ApprovalRequest.agent_id == agent.id, ApprovalRequest.status == "pending")).scalar_one()
+    if active or pending:
+        raise HTTPException(409, f"{agent.name} has {active} active task(s) and {pending} pending approval(s). "
+                                 "Cancel them first, then delete the agent.")
+    # Drop it from other agents' delegation allow-lists (a new, audited version for each).
+    updated: list[str] = []
+    for other in db.execute(select(Agent).where(Agent.org_id == p.org_id, Agent.id != agent.id)).scalars():
+        cur = db.execute(select(AgentVersion).where(AgentVersion.agent_id == other.id,
+                                                    AgentVersion.version == other.current_version)).scalar_one()
+        allowed = ((cur.config.get("policy") or {}).get("delegation") or {}).get("allowed_agent_ids") or []
+        if agent.id not in allowed:
+            continue
+        cfg = dict(cur.config)
+        policy = dict(cfg["policy"])
+        policy["delegation"] = {**policy["delegation"], "allowed_agent_ids": [a for a in allowed if a != agent.id]}
+        cfg["policy"] = policy
+        other.current_version += 1
+        db.add(AgentVersion(agent_id=other.id, version=other.current_version, config=cfg, created_by=p.user_id,
+                            change_note=f"Removed deleted agent {agent.name} from delegation targets"[:300]))
+        updated.append(other.name)
+    tasks = db.execute(select(func.count()).select_from(Task).where(Task.agent_id == agent.id)).scalar_one()
+    schedules = db.execute(select(func.count()).select_from(Schedule).where(Schedule.agent_id == agent.id)).scalar_one()
+    audit.record(db, p.org_id, "agent.deleted", actor_id=p.user_id, target_type="agent", target_id=agent.id,
+                 details={"name": agent.name, "versions": agent.current_version, "tasks": tasks,
+                          "schedules": schedules, "delegation_updated": updated})
+    db.delete(agent)  # versions, sessions, tasks (with events, artifacts, approvals) and schedules cascade
+    db.commit()
+    root = get_settings().workspaces_dir
+    ws = (root / p.org_id / agent_id).resolve()
+    if ws.is_relative_to(root) and ws != root:
+        shutil.rmtree(ws, ignore_errors=True)
+    return {"deleted": True, "tasks_deleted": tasks, "schedules_deleted": schedules, "delegation_updated": updated}
 
 
 @router.get("/agents/{agent_id}/versions")

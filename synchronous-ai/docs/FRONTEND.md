@@ -57,10 +57,15 @@ UI are cosmetic — the backend enforces RBAC on every request.
 | Requested | Status | What the UI does |
 |---|---|---|
 | Pause / resume a running execution | Not supported by the orchestrator | Offers **Cancel execution** only |
-| Delete an agent | Not supported (history and audit must remain) | **Disable** the agent instead |
 | Organization switching | Single organization per deployment | Organization shown, no switcher |
 | Actual (invoiced) cost | Not available from providers' APIs | Costs labelled **estimate**, computed from published rates |
 | Integration "connected" | Requires a successful live test | A saved credential alone shows **Untested** |
+
+**Deleting an agent** (agent menu → *Delete agent*, type the name to confirm) is permanent:
+`DELETE /api/agents/{id}` removes its versions, tasks, sessions, schedules and workspace files.
+The API refuses (409) while it has active tasks or pending approvals. Usage records and the
+hash-chained audit log are kept (`agent.deleted`), and agents that could delegate to it get a new
+configuration version without it. To keep history, **Disable** the agent instead.
 
 ## Tests
 
