@@ -388,3 +388,42 @@ def test_audit_chain_detects_tampering(admin):
     finally:
         with session_scope() as db:
             db.execute(select(AuditEvent).order_by(AuditEvent.id).limit(1)).scalar_one().action = original
+
+
+def test_concurrent_audit_appends_do_not_deadlock_and_keep_the_chain(admin):
+    """Regression: a session that already holds the DB write lock and then appends to the audit
+    log must not deadlock with a session appending with a pending write (seen as a login 500)."""
+    from sca.models import Team
+    from sca.services import audit
+
+    org_id = admin.get("/api/auth/me").json()["org"]["id"]
+    errors: list[str] = []
+
+    def writer_then_audit(i: int) -> None:
+        try:
+            with session_scope() as db:
+                db.add(Team(org_id=org_id, name=f"audit-race-w{i}"))
+                db.flush()
+                time.sleep(0.2)
+                audit.record(db, org_id, "test.writer", actor_type="system")
+        except Exception as exc:  # noqa: BLE001
+            errors.append(repr(exc))
+
+    def pending_then_audit(i: int) -> None:
+        try:
+            time.sleep(0.05)
+            with session_scope() as db:
+                db.add(Team(org_id=org_id, name=f"audit-race-p{i}"))
+                audit.record(db, org_id, "test.pending", actor_type="system")
+        except Exception as exc:  # noqa: BLE001
+            errors.append(repr(exc))
+
+    threads = [threading.Thread(target=f, args=(i,)) for i in range(4) for f in (writer_then_audit, pending_then_audit)]
+    t0 = time.time()
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=60)
+    assert not errors, errors
+    assert time.time() - t0 < 10, "appends were serialized behind a lock timeout"
+    assert admin.get("/api/audit/verify").json()["valid"] is True
