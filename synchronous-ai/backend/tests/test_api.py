@@ -550,3 +550,52 @@ def test_connector_catalog_and_gateway_body_controls(admin):
             assert exc.value.code == "write_not_allowed"
     finally:
         srv.shutdown()
+
+
+class _SlackLike(BaseHTTPRequestHandler):
+    """Answers HTTP 200 with {"ok": false} like Slack does for a bad token."""
+
+    def log_message(self, *a):
+        pass
+
+    def do_GET(self):  # noqa: N802
+        out = json.dumps({"ok": False, "error": "invalid_auth"}).encode()
+        self.send_response(200)
+        self.send_header("content-type", "application/json")
+        self.send_header("content-length", str(len(out)))
+        self.end_headers()
+        self.wfile.write(out)
+
+
+def test_connector_suggestions_connected_badge_and_ok_field_health(admin, offline_provider):
+    r = admin.post("/api/agents", {"name": "Deal Desk", "category": "Sales", "config": {
+        "role": "seller", "model": {"provider_id": offline_provider, "model": "test-model"}, "tools": ["file_editor"]}})
+    assert r.status_code == 201, r.text
+    cat = {c["key"]: c for c in admin.get("/api/integrations/connectors").json()}
+    assert len(cat) >= 23
+    suggested = sorted((c for c in cat.values() if c["suggested_rank"] is not None), key=lambda c: c["suggested_rank"])
+    assert suggested and all("Deal Desk" in c["suggested_reason"] for c in suggested)
+    assert {"salesforce", "gmail"} & {c["key"] for c in suggested}
+    assert len({c["vendor"] for c in suggested if c["vendor"] != "Google"}) == len([c for c in suggested if c["vendor"] != "Google"])
+
+    # Adding a connector marks it as added and removes it from the suggestions.
+    first = suggested[0]
+    params = {p["key"]: p.get("default") or "x" for p in first["params"]}
+    i = admin.post(f"/api/integrations/connectors/{first['key']}", {"params": params}).json()
+    assert i["connector_key"] == first["key"]
+    cat = {c["key"]: c for c in admin.get("/api/integrations/connectors").json()}
+    assert cat[first["key"]]["connected"] == [{"id": i["id"], "name": i["name"], "status": "proposed"}]
+    assert cat[first["key"]]["suggested_rank"] is None
+    admin.delete(f"/api/integrations/{i['id']}")
+
+    # APIs that report auth failures inside a 200 response are not shown as connected.
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), _SlackLike)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        s = admin.post("/api/integrations", {"name": "slack-like", "type": "http", "credential": "xoxb-invalid-0000", "config": {
+            "base_url": f"http://127.0.0.1:{srv.server_port}", "auth": {"type": "bearer"},
+            "health_check_path": "/auth.test", "health_ok_field": "ok"}}).json()
+        res = admin.post(f"/api/integrations/{s['id']}/test").json()["result"]
+        assert res["ok"] is False and "invalid_auth" in res["detail"]
+    finally:
+        srv.shutdown()

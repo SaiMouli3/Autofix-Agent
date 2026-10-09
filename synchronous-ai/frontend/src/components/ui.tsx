@@ -132,7 +132,7 @@ export function Spinner({ label = "Loading" }: { label?: string }) {
 // ------------------------------------------------------------------ dialog
 
 export function Dialog({ title, description, onClose, children, footer, size }: {
-  title: string; description?: ReactNode; onClose: () => void; children?: ReactNode; footer?: ReactNode; size?: "wide" | "narrow";
+  title: string; description?: ReactNode; onClose: () => void; children?: ReactNode; footer?: ReactNode; size?: "wide" | "narrow" | "xl";
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const titleId = useId();

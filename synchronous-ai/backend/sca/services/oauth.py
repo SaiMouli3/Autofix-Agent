@@ -137,7 +137,7 @@ def start(db: Session, integ: Integration, user_id: str) -> str:
     params = {"response_type": "code", "client_id": b["client_id"], "redirect_uri": redirect_uri(), "state": state,
               **(o.get("extra_authorize_params") or {})}
     if o.get("scopes"):
-        params["scope"] = " ".join(o["scopes"])
+        params["scope"] = (o.get("scope_separator") or " ").join(o["scopes"])
     if o.get("pkce", True):
         params.update(code_challenge=challenge, code_challenge_method="S256")
     sep = "&" if urlparse(o["authorize_url"]).query else "?"
@@ -265,7 +265,8 @@ def access_token(integ_id: str, *, force_refresh: bool = False, stale_token: str
         try:
             tok = _token_request(o, data)
         except OAuthError as exc:
-            if exc.code in ("invalid_grant", "invalid_client", "unauthorized_client"):
+            if exc.code in ("invalid_grant", "invalid_client", "unauthorized_client",
+                            "invalid_refresh_token", "token_revoked", "invalid_client_id"):  # Slack names
                 bundle["needs_reauthorization"] = True
                 save_bundle(db, integ, bundle, None)
                 integ.health = {**(integ.health or {}), "ok": False, "checked_at": utcnow().isoformat(),

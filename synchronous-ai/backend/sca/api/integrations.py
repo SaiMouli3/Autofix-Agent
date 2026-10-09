@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 from sca.api.deps import Principal, current_principal, require, scoped
 from sca.db import get_db
 from sca.agent_config import AgentConfig
-from sca.connectors import ConnectorError, instantiate, public_catalog
+from sca.connectors import ConnectorError, instantiate, public_catalog, rank_suggestions
 from sca.models import Agent, AgentVersion, AuditEvent, Integration, Secret
 from sca.services import audit, oauth
 from sca.services.integrations import (
@@ -79,6 +79,7 @@ def _permitted_agents(db: Session, org_id: str, integ_id: str) -> list[dict]:
 def _out(db: Session, i: Integration, detail: bool = False) -> dict:
     sec = db.get(Secret, i.secret_id) if i.secret_id else None
     out = {"id": i.id, "name": i.name, "description": i.description, "type": i.type, "category": i.category,
+           "connector_key": i.connector_key,
            "status": i.status,
            "config": i.config, "has_credential": sec is not None, "credential_fingerprint": sec.fingerprint if sec else None,
            "health": i.health, "last_success_at": i.last_success_at, "created_at": i.created_at,
@@ -117,11 +118,24 @@ class ConnectorIn(BaseModel):
 
 
 @router.get("/connectors")
-def list_connectors(p: Principal = Depends(require("integrations:read"))):
+def list_connectors(p: Principal = Depends(require("integrations:read")), db: Session = Depends(get_db)):
+    """Catalog plus, per connector, the integrations already made from it and a suggestion
+    reason when it fits the organization's agents."""
     items = public_catalog()
+    used: dict[str, list[dict]] = {}
+    for i in db.execute(select(Integration).where(Integration.org_id == p.org_id,
+                                                  Integration.connector_key.is_not(None))).scalars():
+        used.setdefault(i.connector_key, []).append({"id": i.id, "name": i.name, "status": i.status})
+    agents = [(a.name, a.category) for a in db.execute(select(Agent).where(Agent.org_id == p.org_id,
+                                                                          Agent.status != "disabled")).scalars()]
+    suggested = rank_suggestions(agents, set(used))
+    order = {k: n for n, k in enumerate(suggested)}
     for c in items:
         if c.get("auth") == "oauth2":
             c["oauth_redirect_uri"] = oauth.redirect_uri()
+        c["connected"] = used.get(c["key"], [])
+        c["suggested_reason"] = suggested.get(c["key"])
+        c["suggested_rank"] = order.get(c["key"])
     return items
 
 
@@ -137,6 +151,7 @@ def create_from_connector(key: str, body: ConnectorIn, p: Principal = Depends(re
     i = _create(db, p, name=body.name or spec["name"], description=spec["description"], kind=spec["type"],
                 category=spec["category"], config=spec["config"],
                 credential=None if uses_oauth else body.credential, details={"connector": key})
+    i.connector_key = key
     if uses_oauth and body.oauth_client:
         oauth.set_client(db, i, body.oauth_client.client_id, body.oauth_client.client_secret, p.user_id)
     db.commit()

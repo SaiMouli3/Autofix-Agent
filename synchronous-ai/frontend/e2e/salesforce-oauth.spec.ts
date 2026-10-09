@@ -87,7 +87,7 @@ test("connect Salesforce with one-click OAuth sign-in", async ({ page }) => {
   // The connector gallery shows the callback URL to register in the External Client App.
   await page.goto("/integrations");
   await page.getByRole("button", { name: "Browse connectors" }).first().click();
-  await page.getByRole("button", { name: /^Salesforce\s+Salesforce\s+HTTP API/ }).click();
+  await page.getByRole("button", { name: "Salesforce by Salesforce", exact: true }).first().click();
   await expect(page.getByText(/\/api\/oauth\/callback$/).first()).toBeVisible();
   await page.getByRole("button", { name: "Add as proposed" }).click();
   await expect(page.getByRole("complementary", { name: "Salesforce details" })).toBeVisible();
@@ -102,8 +102,8 @@ test("connect Salesforce with one-click OAuth sign-in", async ({ page }) => {
   await page.goto(`/integrations?id=${created.id}`);
   const panel = page.getByRole("region", { name: "Sign-in" });
   await expect(panel.getByText("Not signed in")).toBeVisible();
-  await panel.getByLabel("Consumer key (client ID)").fill(CLIENT.id);
-  await panel.getByLabel("Consumer secret").fill(CLIENT.secret);
+  await panel.getByLabel("Client ID").fill(CLIENT.id);
+  await panel.getByLabel("Client secret").fill(CLIENT.secret);
   await panel.getByRole("button", { name: "Save client" }).click();
   await expect(page.getByText("Client credentials stored encrypted")).toBeVisible();
   await panel.getByRole("button", { name: "Connect Salesforce" }).click();

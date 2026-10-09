@@ -122,7 +122,8 @@ export default function Integrations() {
         {current?.kind === "provider" && <ProviderDetail key={current.id} p={current.raw} onClose={close} />}
       </div>
       {modal === "new" && <IntegrationForm initial={proposal} onClose={() => setModal("")} onCreated={(id) => { setModal(""); open(id); }} />}
-      {modal === "connectors" && <ConnectorGallery onClose={() => setModal("")} onCreated={(id) => { setModal(""); open(id); }} />}
+      {modal === "connectors" && <ConnectorGallery onClose={() => setModal("")} onCreated={(id) => { setModal(""); open(id); }}
+        onImport={() => setModal("import")} onCustom={() => { setProposal(null); setModal("new"); }} />}
       {modal === "import" && <ImportDialog onClose={() => setModal("")} onProposal={(p) => { setProposal(p); setModal("new"); }} />}
     </Shell>
   );
@@ -423,7 +424,7 @@ function opWrites(o: any) {
 
 // ------------------------------------------------------------------ prebuilt connectors
 
-function ConnectorGallery({ onClose, onCreated }: { onClose: () => void; onCreated: (id: string) => void }) {
+function ConnectorGallery({ onClose, onCreated, onImport, onCustom }: { onClose: () => void; onCreated: (id: string) => void; onImport: () => void; onCustom: () => void }) {
   const qc = useQueryClient();
   const toast = useToast();
   const list = useQuery({ queryKey: ["connectors"], queryFn: ({ signal }) => api.get("/api/integrations/connectors", signal) });
@@ -451,23 +452,8 @@ function ConnectorGallery({ onClose, onCreated }: { onClose: () => void; onCreat
   });
   const choose = (c: any) => { setPick(c); setValues({}); setCredential(""); setClient({ client_id: "", client_secret: "" }); setTouched(false); create.reset(); };
   if (!pick) {
-    return (
-      <Dialog size="wide" title="Connectors" description="Prebuilt definitions for common business systems. Each one is added as a proposed integration: nothing is connected until a live test passes and an administrator activates it." onClose={onClose}>
-        {list.isLoading && <SkeletonRows rows={4} />}
-        <ErrorState error={list.error} onRetry={() => list.refetch()} what="connectors" />
-        <div className="grid cols-2" style={{ gap: 10 }}>
-          {(list.data ?? []).map((c: any) => (
-            <button key={c.key} type="button" className="choice" disabled={!c.available} onClick={() => choose(c)} style={{ flexDirection: "column", alignItems: "stretch", gap: 4, textAlign: "left" }}>
-              <span className="row between"><b className="small">{c.name}</b><span className="row" style={{ gap: 4 }}><Tag tone="outline">{c.vendor}</Tag><Tag>{c.type === "mcp" ? "MCP server" : "HTTP API"}</Tag></span></span>
-              <span className="small muted">{c.summary}</span>
-              {c.operations && <span className="tiny muted">{c.operations.filter((o: any) => o.read_only).length} read · {c.operations.filter((o: any) => !o.read_only).length} change (approval required){c.auth === "oauth2" ? " · one-click sign-in" : ""}</span>}
-              {!c.operations && c.auth === "oauth2" && <span className="tiny muted">One-click sign-in</span>}
-              {!c.available && <span className="tiny" style={{ color: "var(--warning)" }}>{c.unavailable_reason}</span>}
-            </button>
-          ))}
-        </div>
-      </Dialog>
-    );
+    return <ConnectorBrowser items={list.data} loading={list.isLoading} error={list.error} onRetry={() => list.refetch()}
+      onPick={choose} onClose={onClose} onImport={onImport} onCustom={onCustom} />;
   }
   return (
     <Dialog size="wide" title={`Connect ${pick.name}`} description={pick.summary} onClose={onClose}
@@ -491,8 +477,8 @@ function ConnectorGallery({ onClose, onCreated }: { onClose: () => void; onCreat
             <p className="small muted" style={{ margin: 0 }}>{pick.oauth_client.help}</p>
             <KV items={[["Callback URL", <CopyText key="cb" value={pick.oauth_redirect_uri} />], ["OAuth scopes", <span key="sc" className="mono small">{pick.oauth_client.scopes}</span>]]} />
             <div className="form-grid">
-              <label className="field">Consumer key (client ID)<input value={client.client_id} onChange={(e) => setClient({ ...client, client_id: e.target.value })} autoComplete="off" /></label>
-              <label className="field">Consumer secret<input type="password" value={client.client_secret} onChange={(e) => setClient({ ...client, client_secret: e.target.value })} autoComplete="off" /><span className="help">Stored encrypted. You can also add these later.</span></label>
+              <label className="field">Client ID<input value={client.client_id} onChange={(e) => setClient({ ...client, client_id: e.target.value })} autoComplete="off" /></label>
+              <label className="field">Client secret<input type="password" value={client.client_secret} onChange={(e) => setClient({ ...client, client_secret: e.target.value })} autoComplete="off" /><span className="help">Stored encrypted. You can also add these later.</span></label>
             </div>
           </div>
         )}
@@ -578,13 +564,115 @@ function OAuthPanel({ i, write, onChanged }: { i: any; write: boolean; onChanged
       {write && editing && (
         <form className="stack tight mt8" onSubmit={(e) => { e.preventDefault(); if (client.client_id.trim()) saveClient.mutate(); }}>
           <div className="form-grid">
-            <label className="field">Consumer key (client ID)<input value={client.client_id} onChange={(e) => setClient({ ...client, client_id: e.target.value })} autoComplete="off" /></label>
-            <label className="field">Consumer secret<input type="password" value={client.client_secret} onChange={(e) => setClient({ ...client, client_secret: e.target.value })} autoComplete="off" /></label>
+            <label className="field">Client ID<input value={client.client_id} onChange={(e) => setClient({ ...client, client_id: e.target.value })} autoComplete="off" /></label>
+            <label className="field">Client secret<input type="password" value={client.client_secret} onChange={(e) => setClient({ ...client, client_secret: e.target.value })} autoComplete="off" /></label>
           </div>
           {o.connected && <span className="tiny" style={{ color: "var(--warning)" }}>Changing the client disconnects the current sign-in.</span>}
           <div><button className="btn sm" disabled={!client.client_id.trim() || saveClient.isPending}><KeyRound /> Save client</button></div>
         </form>
       )}
     </section>
+  );
+}
+
+// ------------------------------------------------------------------ connector browser
+
+const MONO_COLORS = ["#C65D32", "#4776A8", "#27845A", "#7A5BA6", "#9A6417", "#2F7F86", "#A04F6B", "#5B615C"];
+
+/** Neutral monogram instead of vendor logos: no third-party brand assets are bundled or fetched. */
+function Monogram({ name, vendor }: { name: string; vendor: string }) {
+  let h = 0;
+  for (const ch of vendor) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  const words = name.replace(/[^A-Za-z0-9 ]/g, " ").split(/\s+/).filter(Boolean);
+  const letters = (words.length > 1 ? words[0][0] + words[1][0] : name.slice(0, 2)).toUpperCase();
+  return <span className="conn-logo" style={{ background: MONO_COLORS[h % MONO_COLORS.length] }} aria-hidden>{letters}</span>;
+}
+
+function ConnectorCard({ c, onPick, reason }: { c: any; onPick: (c: any) => void; reason?: string | null }) {
+  const reads = c.operations?.filter((o: any) => o.read_only).length ?? 0;
+  const changes = c.operations ? c.operations.length - reads : 0;
+  const added = c.connected?.length ?? 0;
+  return (
+    <button type="button" className="conn-card" disabled={!c.available} onClick={() => onPick(c)}
+      aria-label={`${c.name} by ${c.vendor}${added ? ", already added" : ""}`}>
+      <span className="row" style={{ gap: 10, alignItems: "flex-start" }}>
+        <Monogram name={c.name} vendor={c.vendor} />
+        <span className="grow" style={{ minWidth: 0 }}>
+          <span className="row between" style={{ gap: 6 }}>
+            <b className="small ellipsis">{c.name}</b>
+            {added > 0 && <Tag tone="success">{c.connected.some((x: any) => x.status === "active") ? "Connected" : "Added"}</Tag>}
+          </span>
+          <span className="tiny muted">{c.vendor} · {c.type === "mcp" ? "MCP server" : "API"}{c.auth === "oauth2" ? " · one-click sign-in" : ""}</span>
+        </span>
+      </span>
+      <span className="small muted conn-summary">{c.summary}</span>
+      {reason && <span className="tiny conn-reason">{reason}</span>}
+      <span className="tiny faint">
+        {!c.available ? <span style={{ color: "var(--warning)" }}>{c.unavailable_reason}</span>
+          : c.operations ? `${reads} read${changes ? ` · ${changes} change with approval` : " · read-only"}` : "Tools listed after connecting"}
+      </span>
+    </button>
+  );
+}
+
+function ConnectorBrowser({ items, loading, error, onRetry, onPick, onClose, onImport, onCustom }: {
+  items?: any[]; loading: boolean; error: any; onRetry: () => void; onPick: (c: any) => void; onClose: () => void; onImport: () => void; onCustom: () => void;
+}) {
+  const [q, setQ] = useState("");
+  const [group, setGroup] = useState("");
+  const all = items ?? [];
+  const groups = Array.from(new Map(all.map((c) => [c.group, c.group_label])).entries()).sort((a, b) => String(a[1]).localeCompare(String(b[1])));
+  const ql = q.trim().toLowerCase();
+  const filtered = all.filter((c) => (!group || c.group === group) && (!ql || `${c.name} ${c.vendor} ${c.summary} ${c.group_label}`.toLowerCase().includes(ql)));
+  const browsing = !ql && !group;
+  const suggested = all.filter((c) => c.suggested_rank != null).sort((a, b) => a.suggested_rank - b.suggested_rank);
+  const popular = [...all].filter((c) => c.suggested_rank == null && c.available).sort((a, b) => b.popularity - a.popularity).slice(0, 6);
+  const byName = (a: any, b: any) => a.name.localeCompare(b.name);
+  return (
+    <Dialog size="xl" title="Connect an app" description="Prebuilt, reviewed connectors. Each is added as a proposed integration and only goes live after a successful connection test and an administrator's approval." onClose={onClose}
+      footer={<div className="row between grow wrap" style={{ gap: 8 }}>
+        <span className="tiny muted">Don't see your app?</span>
+        <span className="row"><button className="btn sm" onClick={onImport}><Wand2 /> Import from API docs</button><button className="btn sm" onClick={onCustom}><Plus /> Custom integration</button></span>
+      </div>}>
+      <div className="stack">
+        <div className="row wrap" style={{ gap: 8 }}>
+          <div className="grow" style={{ minWidth: 220 }}><SearchField value={q} onChange={setQ} placeholder="Search apps, e.g. Gmail, CRM, tickets" label="Search connectors" /></div>
+        </div>
+        <div className="row wrap" role="group" aria-label="Connector category" style={{ gap: 6 }}>
+          <button className="chip-btn" aria-pressed={!group} onClick={() => setGroup("")}>All <span className="c">{all.length}</span></button>
+          {groups.map(([key, label]) => (
+            <button key={key} className="chip-btn" aria-pressed={group === key} onClick={() => setGroup(group === key ? "" : key)}>
+              {label} <span className="c">{all.filter((c) => c.group === key).length}</span>
+            </button>
+          ))}
+        </div>
+        {loading && <SkeletonRows rows={4} />}
+        <ErrorState error={error} onRetry={onRetry} what="connectors" />
+        {browsing && suggested.length > 0 && (
+          <section aria-labelledby="sugg-h">
+            <h3 id="sugg-h" className="section-title">Suggested for your agents</h3>
+            <div className="conn-grid">{suggested.map((c) => <ConnectorCard key={c.key} c={c} onPick={onPick} reason={c.suggested_reason} />)}</div>
+          </section>
+        )}
+        {browsing && popular.length > 0 && (
+          <section aria-labelledby="pop-h">
+            <h3 id="pop-h" className="section-title">Popular</h3>
+            <div className="conn-grid">{popular.map((c) => <ConnectorCard key={c.key} c={c} onPick={onPick} />)}</div>
+          </section>
+        )}
+        {browsing ? groups.map(([key, label]) => (
+          <section key={key} aria-labelledby={`g-${key}`}>
+            <h3 id={`g-${key}`} className="section-title">{label}</h3>
+            <div className="conn-grid">{all.filter((c) => c.group === key).sort(byName).map((c) => <ConnectorCard key={c.key} c={c} onPick={onPick} />)}</div>
+          </section>
+        )) : (
+          <section aria-label="Results">
+            {filtered.length === 0
+              ? <Empty title="No connector matches">Try another name, or add it from its API documentation or as a custom integration.</Empty>
+              : <div className="conn-grid">{filtered.sort((a, b) => b.popularity - a.popularity).map((c) => <ConnectorCard key={c.key} c={c} onPick={onPick} reason={c.suggested_reason} />)}</div>}
+          </section>
+        )}
+      </div>
+    </Dialog>
   );
 }

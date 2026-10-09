@@ -167,11 +167,13 @@ def test_connectors_instantiate_and_validate():
               "whatsapp_cloud": {"phone_number_id": "1098765432", "waba_id": "2233445566"},
               "salesforce": {"login_host": "https://Acme.my.salesforce.com/"},
               "sap_s4hana": {"host": "my123456-api.s4hana.cloud.sap", "username": "COMM_USER"},  # not resolvable
-              "sap_api_sandbox": {}}
+              "sap_api_sandbox": {},
+              "zendesk": {"subdomain": "acme", "email": "ops@acme.com"},
+              "jira": {"site": "acme", "email": "ops@acme.com"}}
     for c in CONNECTORS:
         if c["type"] != "http":
             continue
-        spec = instantiate(c["key"], params[c["key"]])
+        spec = instantiate(c["key"], params.get(c["key"], {}))
         cfg = validate_config("http", spec["config"])
         assert "{{" not in json.dumps(cfg)
         report = [x for x in validation_report("http", spec["config"]) if not x["ok"]]
@@ -181,7 +183,7 @@ def test_connectors_instantiate_and_validate():
             assert not report, c["key"]
         for op in cfg["operations"]:
             # Every operation that can change external data waits for a human.
-            if op["method"] != "GET" and op.get("graphql") != "query":
+            if op["method"] != "GET" and op.get("graphql") != "query" and not op.get("read_only"):
                 assert op["requires_approval"], (c["key"], op["name"])
     shop = instantiate("shopify_admin", params["shopify_admin"])["config"]
     assert shop["base_url"] == "https://acme-store.myshopify.com/admin/api/2026-07"
@@ -224,3 +226,57 @@ def test_salesforce_and_sap_connectors():
     with pytest.raises(ValidationError):  # OAuth endpoints must be https
         validate_config("http", {"base_url": "https://x.example.com", "auth": {"type": "oauth2"},
                                  "oauth": {"authorize_url": "http://evil.example.com/a", "token_url": "https://x/t"}})
+
+
+def test_popular_connectors_catalog_and_argument_checks():
+    from sca.connectors import GROUPS, instantiate, public_catalog
+    from sca.services.integrations import IntegrationError, _render_path, _validate_args, Operation
+
+    cat = {c["key"]: c for c in public_catalog()}
+    for key in ("gmail", "google_calendar", "google_drive", "microsoft_365", "slack", "notion", "hubspot", "jira",
+                "github", "github_mcp", "stripe", "stripe_mcp", "zendesk", "airtable"):
+        assert key in cat and cat[key]["group"] in GROUPS and cat[key]["popularity"] > 0 and cat[key]["suggest_for"]
+    # Stripe is read-only by design; every change operation elsewhere waits for approval.
+    assert all(o["read_only"] for o in cat["stripe"]["operations"])
+    for c in cat.values():
+        for o in c.get("operations") or []:
+            assert o["read_only"] or o["requires_approval"], (c["key"], o["name"])
+    slack = validate_config("http", instantiate("slack", {})["config"])
+    assert slack["oauth"]["scope_separator"] == "," and slack["health_ok_field"] == "ok"
+    gmail = validate_config("http", instantiate("gmail", {})["config"])
+    assert gmail["oauth"]["extra_authorize_params"]["access_type"] == "offline"
+    ms = validate_config("http", instantiate("microsoft_365", {"tenant": "acme.onmicrosoft.com"})["config"])
+    assert ms["oauth"]["token_url"] == "https://login.microsoftonline.com/acme.onmicrosoft.com/oauth2/v2.0/token"
+    # Declared argument constraints are enforced, and '..' can never walk to another endpoint.
+    op = Operation(name="x", path="/repos/{owner}/{repo}", params_schema={"type": "object", "properties": {
+        "owner": {"type": "string", "pattern": r"^(?!\.\.?$)[A-Za-z0-9_.-]{1,100}$"}, "repo": {"type": "string"},
+        "state": {"type": "string", "enum": ["open", "closed"]}, "n": {"type": "integer", "maximum": 5}}})
+    for bad in ({"owner": ".."}, {"owner": "a/b"}, {"state": "all"}, {"n": 9}, {"n": "3"}):
+        with pytest.raises(IntegrationError):
+            _validate_args(op, bad)
+    _validate_args(op, {"owner": "acme", "repo": "api", "state": "open", "n": 3})
+    with pytest.raises(IntegrationError):
+        _render_path("/repos/{owner}/{repo}", {"owner": "acme", "repo": ".."})
+
+
+def test_gmail_compose_and_decode():
+    import base64
+
+    from sca.services.integrations import IntegrationError, _compose_email, _decode_gmail_message
+
+    draft = _compose_email("gmail_draft", {"to": ["jo@acme.com"], "subject": "Re: pricing", "body": "Hi Jo",
+                                           "thread_id": "t1", "in_reply_to": "<m1@mail.gmail.com>"})
+    raw = base64.urlsafe_b64decode(draft["message"]["raw"] + "==").decode()
+    assert draft["message"]["threadId"] == "t1" and "In-Reply-To: <m1@mail.gmail.com>" in raw and "Hi Jo" in raw
+    for bad in ({"to": ["a@x.com\nBcc: evil@x.com"], "subject": "s"}, {"to": ["a@x.com"], "subject": "a\r\nBcc: e@x.com"},
+                {"subject": "no recipient"}):
+        with pytest.raises(IntegrationError):
+            _compose_email("gmail_raw", bad)
+    enc = lambda t: base64.urlsafe_b64encode(t.encode()).decode().rstrip("=")  # noqa: E731
+    msg = {"id": "m1", "threadId": "t1", "snippet": "Hello", "payload": {
+        "headers": [{"name": "From", "value": "Jo <jo@acme.com>"}, {"name": "Subject", "value": "Pricing"}],
+        "parts": [{"mimeType": "text/html", "body": {"data": enc("<p>Hello <b>there</b></p><script>x()</script>")}},
+                  {"mimeType": "application/pdf", "filename": "quote.pdf", "body": {"size": 1200}}]}}
+    out = _decode_gmail_message(msg)
+    assert out["from"] == "Jo <jo@acme.com>" and out["subject"] == "Pricing"
+    assert out["body"] == "Hello there" and out["attachments"][0]["filename"] == "quote.pdf"

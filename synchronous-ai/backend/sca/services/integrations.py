@@ -55,6 +55,13 @@ class Operation(BaseModel):
     fixed_body: dict[str, Any] = Field(default_factory=dict)
     # Query parameters sent unless the agent supplies its own value.
     default_query: dict[str, str] = Field(default_factory=dict)
+    # POST endpoints that only read (search APIs). Reviewed with the connector; never set by agents.
+    read_only: bool = False
+    # Build the request body from simple fields instead of making the agent encode it:
+    # "gmail_raw" -> {"raw": base64url(RFC 822)}, "gmail_draft" -> {"message": {"raw": ...}}.
+    compose: Literal["gmail_raw", "gmail_draft"] | None = None
+    # Turn the vendor's response into something an agent can read ("gmail_message" decodes MIME parts).
+    decode: Literal["gmail_message", "gmail_thread"] | None = None
     # Arguments sent as request headers instead of body/query, e.g. {"if_match": "If-Match"}.
     header_params: dict[str, str] = Field(default_factory=dict)
 
@@ -82,6 +89,7 @@ class OAuthSettings(BaseModel):
     token_url: str
     revoke_url: str = ""
     scopes: list[str] = Field(default_factory=list)
+    scope_separator: Literal[" ", ","] = " "  # Slack uses commas
     pkce: bool = True
     extra_authorize_params: dict[str, str] = Field(default_factory=dict)
     # Token-response field carrying the account's API host (Salesforce: instance_url). When set,
@@ -119,6 +127,8 @@ class HttpConfig(BaseModel):
     auth: AuthConfig = Field(default_factory=AuthConfig)
     default_headers: dict[str, str] = Field(default_factory=dict)
     health_check_path: str = ""
+    # For APIs that answer HTTP 200 on auth errors (Slack): a JSON field that must be truthy.
+    health_ok_field: str = ""
     rate_limit_per_min: int = Field(default=60, ge=1, le=10_000)
     timeout_s: float = Field(default=30, ge=1, le=120)
     operations: list[Operation] = Field(default_factory=list)
@@ -159,6 +169,8 @@ def validate_config(kind: str, config: dict[str, Any]) -> dict[str, Any]:
         for op in cfg.operations:
             if op.graphql and op.method != "POST":
                 raise ValueError(f"GraphQL operation '{op.name}' must use POST")
+            if op.read_only and op.method != "POST":
+                raise ValueError(f"read_only only applies to POST search operations ('{op.name}')")
             if op.method == "DELETE":
                 op.destructive = True
             if op.destructive or op.method in WRITE_METHODS:
@@ -231,7 +243,12 @@ def _render_path(path: str, args: dict[str, Any]) -> tuple[str, set[str]]:
         used.add(key)
         return quote(str(args[key]), safe="")
 
-    return re.sub(r"\{([A-Za-z0-9_]+)\}", sub, path), used
+    rendered = re.sub(r"\{([A-Za-z0-9_]+)\}", sub, path)
+    # "/" is percent-encoded above, but a whole "." or ".." segment would still let an argument walk
+    # to a different endpoint on the same host.
+    if any(seg in (".", "..") for seg in rendered.split("/")):
+        raise IntegrationError("invalid_arguments", "path parameters cannot be '.' or '..'")
+    return rendered, used
 
 
 def _validate_args(op: Operation, args: dict[str, Any]) -> None:
@@ -244,6 +261,33 @@ def _validate_args(op: Operation, args: dict[str, Any]) -> None:
         extra = set(args) - set(props)
         if extra:
             raise IntegrationError("invalid_arguments", f"unexpected arguments: {sorted(extra)}")
+    # Enforce the scalar constraints connectors declare (types, patterns, enums, bounds).
+    for name, spec in props.items():
+        if name not in args or not isinstance(spec, dict):
+            continue
+        v, t = args[name], spec.get("type")
+        bad = None
+        if t == "string" and not isinstance(v, str):
+            bad = "must be a string"
+        elif t == "integer" and (isinstance(v, bool) or not isinstance(v, int)):
+            bad = "must be an integer"
+        elif t == "boolean" and not isinstance(v, bool):
+            bad = "must be true or false"
+        elif t == "object" and not isinstance(v, dict):
+            bad = "must be an object"
+        elif t == "array" and not isinstance(v, list):
+            bad = "must be an array"
+        elif "enum" in spec and v not in spec["enum"]:
+            bad = f"must be one of {spec['enum']}"
+        elif isinstance(v, str) and spec.get("pattern") and not re.fullmatch(spec["pattern"], v):
+            bad = "has an invalid format"
+        elif isinstance(v, str) and spec.get("maxLength") and len(v) > spec["maxLength"]:
+            bad = f"is longer than {spec['maxLength']} characters"
+        elif isinstance(v, int) and not isinstance(v, bool) and (
+                ("minimum" in spec and v < spec["minimum"]) or ("maximum" in spec and v > spec["maximum"])):
+            bad = "is out of range"
+        if bad:
+            raise IntegrationError("invalid_arguments", f"argument '{name}' {bad}")
 
 
 _GQL_NOISE = re.compile(r'"""[\s\S]*?"""|"(?:\\.|[^"\\])*"|#[^\n]*')
@@ -260,10 +304,87 @@ def is_read_only_graphql(document: str) -> bool:
     return _GQL_WRITE.search(_GQL_NOISE.sub(" ", document)) is None
 
 
+def _compose_email(kind: str, fields: dict[str, Any]) -> dict[str, Any]:
+    """RFC 822 message from {to, cc, bcc, subject, body, html, thread_id, in_reply_to}, base64url-encoded
+    the way the Gmail API expects, so agents never hand-encode MIME."""
+    import base64
+    from email.message import EmailMessage
+
+    def addrs(v: Any) -> str:
+        items = v if isinstance(v, list) else [v] if v else []
+        for a in items:
+            if not isinstance(a, str) or "\n" in a or "\r" in a or "@" not in a:
+                raise IntegrationError("invalid_arguments", f"invalid email address: {a!r}")
+        return ", ".join(items)
+
+    if not fields.get("to"):
+        raise IntegrationError("invalid_arguments", "'to' is required")
+    subject = str(fields.get("subject", ""))
+    if "\n" in subject or "\r" in subject:
+        raise IntegrationError("invalid_arguments", "subject must be a single line")
+    msg = EmailMessage()
+    msg["To"] = addrs(fields["to"])
+    if fields.get("cc"):
+        msg["Cc"] = addrs(fields["cc"])
+    if fields.get("bcc"):
+        msg["Bcc"] = addrs(fields["bcc"])
+    msg["Subject"] = subject
+    if fields.get("in_reply_to"):
+        ref = str(fields["in_reply_to"])
+        if "\n" in ref or "\r" in ref:
+            raise IntegrationError("invalid_arguments", "in_reply_to must be a single Message-ID")
+        msg["In-Reply-To"] = ref
+        msg["References"] = ref
+    msg.set_content(str(fields.get("body", "")))
+    if fields.get("html"):
+        msg.add_alternative(str(fields["html"]), subtype="html")
+    raw = base64.urlsafe_b64encode(msg.as_bytes()).decode().rstrip("=")
+    message: dict[str, Any] = {"raw": raw}
+    if fields.get("thread_id"):
+        message["threadId"] = str(fields["thread_id"])
+    return {"message": message} if kind == "gmail_draft" else message
+
+
+def _decode_gmail_message(m: dict[str, Any]) -> dict[str, Any]:
+    """Gmail API message → headers + plain text (HTML stripped if there is no text part)."""
+    import base64
+    import html as html_mod
+
+    headers = {h["name"].lower(): h["value"] for h in (m.get("payload") or {}).get("headers", [])}
+    texts: list[str] = []
+    htmls: list[str] = []
+    attachments: list[dict[str, Any]] = []
+
+    def walk(part: dict[str, Any]) -> None:
+        mime = part.get("mimeType", "")
+        data = (part.get("body") or {}).get("data")
+        if part.get("filename"):
+            attachments.append({"filename": part["filename"], "mime_type": mime, "size": (part.get("body") or {}).get("size")})
+        elif data and mime in ("text/plain", "text/html"):
+            text = base64.urlsafe_b64decode(data + "=" * (-len(data) % 4)).decode("utf-8", errors="replace")
+            (texts if mime == "text/plain" else htmls).append(text)
+        for sub in part.get("parts") or []:
+            walk(sub)
+
+    walk(m.get("payload") or {})
+    body = "\n".join(texts)
+    if not body and htmls:
+        body = html_mod.unescape(re.sub(r"<[^>]+>", " ", re.sub(r"(?is)<(script|style).*?</\1>", " ", "\n".join(htmls))))
+        body = re.sub(r"[ \t]+", " ", body)
+    return {"id": m.get("id"), "thread_id": m.get("threadId"), "labels": m.get("labelIds", []),
+            "from": headers.get("from"), "to": headers.get("to"), "cc": headers.get("cc"),
+            "subject": headers.get("subject"), "date": headers.get("date"), "message_id": headers.get("message-id"),
+            "snippet": m.get("snippet"), "body": body.strip()[:50_000], "attachments": attachments}
+
+
+def _decode_gmail_thread(t: dict[str, Any]) -> dict[str, Any]:
+    return {"id": t.get("id"), "messages": [_decode_gmail_message(m) for m in t.get("messages", [])]}
+
+
 def is_write(op: Operation | dict[str, Any]) -> bool:
     """Whether an operation can change data in the external system."""
     o = op if isinstance(op, dict) else op.model_dump()
-    if o.get("graphql") == "query":
+    if o.get("graphql") == "query" or o.get("read_only"):
         return False
     return o["method"] in WRITE_METHODS
 
@@ -306,6 +427,8 @@ def call_operation(db: Session, integ: Integration, op_name: str, args: dict[str
     elif body is None and rest:
         body = rest
     query = {**op.default_query, **query}
+    if op.compose:
+        body = _compose_email(op.compose, body if isinstance(body, dict) else {})
     if op.fixed_body:
         if body is not None and not isinstance(body, dict):
             raise IntegrationError("invalid_arguments", "'body' must be an object for this operation")
@@ -369,6 +492,8 @@ def call_operation(db: Session, integ: Integration, op_name: str, args: dict[str
             parsed = json.loads(text)
         except json.JSONDecodeError:
             pass
+    if op.decode and isinstance(parsed, dict) and 200 <= status < 300:
+        parsed = _decode_gmail_thread(parsed) if op.decode == "gmail_thread" else _decode_gmail_message(parsed)
     if 200 <= status < 300:
         integ.last_success_at = utcnow()
     return {
@@ -432,7 +557,17 @@ def test_connection(db: Session, integ: Integration) -> dict[str, Any]:
                               timeout=cfg.timeout_s, follow_redirects=False)
             result["status_code"] = r.status_code
             result["ok"] = r.status_code < 400
-            result["detail"] = f"HTTP {r.status_code} from {redact_text(url)}"
+            if result["ok"] and cfg.health_ok_field:
+                try:
+                    flag = r.json().get(cfg.health_ok_field)
+                except (ValueError, AttributeError):
+                    flag = None
+                if not flag:
+                    result["ok"] = False
+                    err = (r.json().get("error") if "json" in r.headers.get("content-type", "") else None) or "rejected"
+                    result["detail"] = f"HTTP {r.status_code} but the API reported '{err}' (authentication rejected)"
+            if "detail" not in result:
+                result["detail"] = f"HTTP {r.status_code} from {redact_text(url)}"
             if r.status_code in (401, 403):
                 result["detail"] += " (authentication rejected)"
         else:

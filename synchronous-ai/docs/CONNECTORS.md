@@ -1,6 +1,16 @@
 # Prebuilt connectors
 
-**Integrations → Browse connectors** creates an integration from a vetted definition. Every connector
+**Integrations → Browse connectors** opens a gallery of 23 vetted connectors:
+- **Suggested for your agents:** ranked by how many of your agents each one suits, based on the
+  agents' categories and names (Sales, Support, Engineering, Finance and so on), one per vendor.
+  Connectors you already added are skipped.
+- **Popular:** the most widely used of the rest.
+- **By category:** email & chat, productivity, CRM & sales, support, developer, payments & finance,
+  commerce, marketing, ERP and data. There's also a search box.
+- **Status:** a connector already in use shows **Added** or **Connected**.
+
+Tiles use neutral monograms; no vendor logos are bundled or fetched. Choosing a connector creates
+an integration from its vetted definition. Every connector
 is added as **proposed**. An administrator then attaches the credential, runs **Test connection**
 (a live request to the vendor), reviews which operations are enabled, assigns agents and activates it.
 Agents never see the credential: the gateway on the platform host injects it on each call.
@@ -18,6 +28,20 @@ Versions were checked against the vendors' live APIs on 2026-10-09.
 | **Salesforce Hosted MCP** | MCP · `api.salesforce.com/platform/mcp/v1/…` · **one-click OAuth** | Salesforce's hosted servers (`sobject-reads`, `sobject-all`, `flows`, …) | follows the agent's approval policy |
 | **SAP S4HANA** | HTTP · OData V2 · communication user | business partners, sales orders, products, plus any released OData service (`odata_query`) | `update_business_partner` (with ETag), `create_sales_order` (off by default) |
 | **SAP API Sandbox** | HTTP · `sandbox.api.sap.com` · API key | the same reads against SAP's public demo tenant | read-only |
+| **Gmail** | HTTP · Gmail API · **one-click OAuth** | search mail, read messages and threads as plain text (MIME decoded), labels | `create_draft`; `send_message` (off by default) — agents pass to/subject/body, the platform builds the MIME |
+| **Google Calendar** | HTTP · Calendar API v3 · **one-click OAuth** | calendars, events, free/busy | `create_event` |
+| **Google Drive** | HTTP · Drive API v3 · **one-click OAuth** | search (incl. shared drives), file details, export Docs/Sheets/Slides as text | read-only |
+| **Microsoft 365** | HTTP · Microsoft Graph v1.0 · **one-click OAuth** | Outlook mail (plain-text bodies), calendar view, OneDrive search, Teams and channels | reply drafts, `send_mail` (off by default), events, Teams posts |
+| **Slack** | HTTP · Web API · **one-click OAuth** (12-hour token rotation handled) | channels, history, threads, users | `post_message` |
+| **Notion** | HTTP · API `2025-09-03` · internal integration secret | search, pages, page content, database (data source) queries | `create_page`, `append_content` |
+| **Airtable** | HTTP · Web API · personal access token | bases, schemas, records | create/update records (off by default) |
+| **HubSpot** | HTTP · CRM v3 · private app token | list, search and read contacts, companies, deals, tickets | create/update (off by default) |
+| **Zendesk** | HTTP · Support API v2 · API token | search, tickets, conversations | `update_ticket` (comment / status) |
+| **Jira** | HTTP · REST v3 (`/search/jql`) · API token | JQL search, issues, transitions | create issue, comment, transition |
+| **GitHub** | HTTP · REST · fine-grained token | search issues/PRs, repository issues and PRs, changed files | create issue, comment |
+| **GitHub MCP** | MCP · `api.githubcopilot.com/mcp/` · fine-grained token | GitHub's official remote server | follows the agent's approval policy |
+| **Stripe** | HTTP · REST · restricted key | balance, customers, payments, invoices, subscriptions | **read-only by design** |
+| **Stripe MCP** | MCP · `mcp.stripe.com` · restricted key | Stripe's official server, scoped by the key | follows the agent's approval policy |
 
 ## One-click sign-in (OAuth 2.0 + PKCE)
 
@@ -78,6 +102,14 @@ Under the hood:
 - **SAP CSRF:** before any write, the gateway fetches `X-CSRF-Token` with SAP's session cookies,
   using the same HTTP client. If the token has expired, SAP answers `403`, and the gateway fetches a
   new one and retries once.
+- **Argument checking:** the gateway enforces each operation's declared argument types, patterns,
+  enums and ranges. Path arguments can never be `.` or `..`, so an argument cannot walk to a
+  different endpoint on the same host.
+- **Read-only POST:** search endpoints that use POST (HubSpot, Notion, Google free/busy) are marked
+  `read_only` in the reviewed definition. That marking is not something an agent can set.
+- **Email composition:** Gmail messages are built by the platform from `to`/`subject`/`body`.
+  Addresses and the subject are rejected if they contain line breaks, which prevents header
+  injection, for example a hidden `Bcc:`.
 - **Header parameters:** an operation can map specific arguments to request headers, for example
   `if_match` → `If-Match` for SAP ETags. Credential headers such as `Authorization`, `Cookie`,
   `APIKey` and `X-CSRF-Token` can never be set this way.
@@ -93,6 +125,12 @@ Under the hood:
 
 ## Not included, and why
 
+- **Notion, Atlassian, HubSpot and Slack official MCP servers:** all four are live, but they register
+  clients dynamically (OAuth Dynamic Client Registration), which the platform doesn't support yet.
+  Their REST APIs are covered by the connectors above.
+- **IMAP/SMTP mailboxes:** these speak mail protocols, not HTTP, and need a separate gateway.
+  Gmail and Microsoft 365 are covered through their APIs.
+
 - **WhatsApp MCP:** Meta publishes no hosted WhatsApp MCP server that we could verify. Community
   servers mostly automate a personal WhatsApp Web session, which breaks WhatsApp's terms for business
   use. The Cloud API connector is the supported route. A third-party MCP server can still be added
@@ -106,6 +144,11 @@ Under the hood:
   which answered `invalid_client_id` to a placeholder client. The SAP sandbox health check reached
   `sandbox.api.sap.com` and was rejected with an invalid key. The complete sign-in, refresh,
   rotation, revocation and CSRF flows are tested end to end against a local test double of the vendor.
+- **Popular connectors (2026-10-09):** every health endpoint was probed with an invalid credential
+  and returned the vendor's auth error, never a 404. Google, Microsoft Graph, Notion, Airtable,
+  HubSpot, Jira, Stripe and Zendesk answered 401; Slack answered `ok:false invalid_auth`, which the
+  ok-field health check reports as failed; GitHub MCP and Stripe MCP answered 401. The GitHub REST
+  probe is not counted: this test sandbox's outbound proxy injects its own GitHub credentials.
 - **Earlier connectors:** live end-to-end calls were verified only up to authentication. Each connector's
   *Test connection* reached the real vendor endpoint and correctly reported an invalid token as
   rejected. Successful calls need your real credentials.

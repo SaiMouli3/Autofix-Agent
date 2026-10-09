@@ -62,18 +62,18 @@ absent from the JS/CSS bundle, API responses and the server log.
 
 | Suite | Result |
 |---|---|
-| Unit + offline integration, SQLite | **54 passed** (34.7 s), incl. OAuth sign-in/refresh/rotation/revocation and SAP CSRF against a local vendor test double |
+| Unit + offline integration, SQLite | **57 passed** (35.6 s), incl. OAuth sign-in/refresh/rotation/revocation and SAP CSRF against a local vendor test double |
 | Connector *Test connection* against live Shopify, Meta Graph and Meta Ads MCP endpoints (invalid token) | all 4 reached the vendor and reported HTTP 401 as failed |
-| Browser E2E through the redesigned UI, Experiential Labs | **1 passed** (25.1 s) |
-| Browser E2E: Salesforce one-click OAuth (real platform, vendor test double) | **1 passed** (2.4 s; also standalone on a fresh instance) |
+| Browser E2E through the redesigned UI, Experiential Labs | **1 passed** (22.8 s) |
+| Browser E2E: Salesforce one-click OAuth via the connector gallery (real platform, vendor test double) | **1 passed** (2.5 s; also standalone on a fresh instance) |
 | Live: Salesforce authorize + token endpoints, SAP sandbox (placeholder credentials) | reached the vendors; rejected as `invalid_client_id` / HTTP 401 |
-| Mocked UI-state tests | **9 passed** (9.7 s) |
+| Mocked UI-state tests | **9 passed** |
 | `ruff` (CI error classes) | clean |
 | `npm audit --omit=dev --audit-level=high` | passes; 2 moderate in react-router (fix only in v7, see SECURITY.md) |
 | Frontend typecheck + production build | clean |
 | Provider key in `dist/` or tracked files | not found |
 
-| Unit + offline integration, PostgreSQL 16 | **54 passed** (39.3 s) |
+| Unit + offline integration, PostgreSQL 16 | **57 passed** (36.1 s) |
 
 Not re-run for this commit: the live pytest suite (last: 8 passed; agent runtime code unchanged since).
 

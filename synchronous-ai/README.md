@@ -25,7 +25,7 @@ observability and the web UI.
 | Governance | Human approval gates (park conversation → approve/reject → resume), budgets, tool-call limits, four-eyes option |
 | Delegation | Agent → agent sub-tasks with allow-lists, depth limits, cycle detection, separate tools/workspace |
 | Knowledge | Upload PDF/DOCX/MD/TXT/HTML/CSV/JSON, chunking, hybrid BM25 + embedding retrieval, per-agent access, cited references |
-| Connectors | One-click OAuth 2.0 + PKCE sign-in; prebuilt Salesforce (REST + Hosted MCP), SAP S/4HANA (OData, CSRF-aware) and SAP API Sandbox, Shopify Admin (GraphQL), Meta Ads (Marketing API + MCP), WhatsApp Business (Cloud API), Shopify Dev MCP — see [docs/CONNECTORS.md](docs/CONNECTORS.md) |
+| Connectors | Gallery of 23 with suggestions for your agents; one-click OAuth 2.0 + PKCE sign-in; Gmail, Google Calendar & Drive, Microsoft 365, Slack, Notion, Airtable, HubSpot, Zendesk, Jira, GitHub (+MCP), Stripe (+MCP), Salesforce (REST + Hosted MCP), SAP S/4HANA (OData, CSRF-aware) and SAP API Sandbox, Shopify Admin (GraphQL), Meta Ads (Marketing API + MCP), WhatsApp Business (Cloud API), Shopify Dev MCP — see [docs/CONNECTORS.md](docs/CONNECTORS.md) |
 | Integrations | HTTP API gateway (credential injection, SSRF guard, size/time/rate limits, audit), MCP servers, OpenAPI and natural-language import with review |
 | Scheduling | One-time, cron (time-zone aware, missed-run policy), HMAC-signed webhooks with replay protection and dedupe |
 | Security | Argon2id, server-side sessions, CSRF, RBAC (5 roles), tenant scoping, Fernet-encrypted secrets, redaction, hash-chained audit log |
@@ -79,7 +79,7 @@ published per-token rates. OpenAI, Anthropic and any other OpenAI-compatible end
 ## Tests
 
 ```bash
-cd backend && pytest -m "not live and not docker"     # 54 offline tests (SQLite; set SCA_DATABASE_URL for Postgres)
+cd backend && pytest -m "not live and not docker"     # 57 offline tests (SQLite; set SCA_DATABASE_URL for Postgres)
 EXP_LABS_API_KEY=... pytest -m live                    # 8 tests on the real runtime + real provider
 EXP_LABS_API_KEY=... ../scripts/e2e.sh                 # Playwright: agent acceptance flow + OAuth sign-in flow
 cd frontend && npm run test:ui                         # MOCKED UI-state tests (no backend; fixtures only)
