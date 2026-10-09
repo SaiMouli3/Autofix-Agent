@@ -599,7 +599,7 @@ button.list-row { width: 100%; border-left: 0; border-right: 0; border-top: 0; b
 .lockup-dark .lockup-word { color: #fff; } .lockup-dark .lockup-sub { color: #aab0a8; }
 .lockup-dark .lockup-mark { box-shadow: 0 0 0 2px rgba(255,255,255,.14); }
 .side-brand { display: flex; min-width: 0; color: inherit; }
-.collapsed .side-brand { flex-grow: 0; }
+.collapsed .side-brand { flex: none; }
 .iso-hub-top img { border-radius: 50%; box-shadow: 0 0 0 3px rgba(255,255,255,.55), 0 6px 18px rgba(0,0,0,.35); }
 .user-btn { max-width: 100%; min-width: 0; overflow: hidden; }
 .user-btn .meta { overflow: hidden; display: block; }

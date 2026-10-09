@@ -80,6 +80,17 @@ test.describe("mocked UI states", () => {
     await expect(page.getByRole("link", { name: "Create your first agent" })).toBeVisible();
   });
 
+  test("collapsed sidebar keeps the brand mark inside the rail", async ({ page }) => {
+    await mockApp(page);
+    await page.goto("/");
+    await page.getByRole("button", { name: "Collapse navigation" }).click();
+    const rail = await page.getByRole("complementary", { name: "Primary navigation" }).boundingBox();
+    const mark = await page.locator(".side-head .lockup-mark").boundingBox();
+    expect(mark!.x).toBeGreaterThanOrEqual(rail!.x);
+    expect(mark!.x + mark!.width).toBeLessThanOrEqual(rail!.x + rail!.width);
+    expect(Math.abs(mark!.x + mark!.width / 2 - (rail!.x + rail!.width / 2))).toBeLessThan(2); // centred
+  });
+
   test("server error shows a retryable error state", async ({ page }) => {
     let fail = true;
     await mockApp(page, { overrides: { "/api/approvals": (r, url) => (fail && url.searchParams.get("page_size") === "20" ? json(r, { detail: "database unavailable" }, 500) : json(r, { items: [], total: 0 })) } });
