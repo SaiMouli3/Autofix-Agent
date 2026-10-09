@@ -1,0 +1,20 @@
+# Overlay enabling the Docker sandbox runtime (recommended for production).
+#   docker compose -f docker-compose.yml -f docker-compose.sandbox.yml up -d
+# The platform container talks to the Docker daemon to start one OpenHands agent-server
+# container per execution. Access to the daemon is root-equivalent on the host: prefer a
+# dedicated sandbox host reached over TLS (DOCKER_HOST=tcp://sandbox-host:2376 with client
+# certificates) instead of mounting the local socket. Agents never receive the socket.
+services:
+  app:
+    environment:
+      SCA_RUNTIME: docker
+      SCA_INTERNAL_BASE_URL: http://host.docker.internal:8000
+      # Workspaces are bind-mounted into sandboxes, so the path must exist on the Docker host.
+      SCA_DATA_DIR: /srv/synchronous-ai/data
+    extra_hosts: ["host.docker.internal:host-gateway"]
+    ports:
+      - "0.0.0.0:8000:8000"   # sandboxes reach the platform MCP endpoint; firewall this port
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /srv/synchronous-ai/data:/srv/synchronous-ai/data
+    group_add: ["${DOCKER_GID:-999}"]

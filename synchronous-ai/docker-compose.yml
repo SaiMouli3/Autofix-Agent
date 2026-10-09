@@ -1,0 +1,50 @@
+# Synchronous Consulting AI — single-node deployment.
+#   cp .env.example .env   # then set SCA_SECRET_KEY, POSTGRES_PASSWORD, SCA_BOOTSTRAP_TOKEN
+#   docker compose up -d --build
+# See docs/DEPLOYMENT.md for the security model of the Docker sandbox runtime.
+name: synchronous-ai
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: sca
+      POSTGRES_DB: sca
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sca -d sca"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [backend]
+
+  app:
+    build: .
+    image: synchronous-ai:latest
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      SCA_DATABASE_URL: postgresql+psycopg://sca:${POSTGRES_PASSWORD}@db:5432/sca
+      SCA_DATA_DIR: /data
+    ports:
+      - "127.0.0.1:8000:8000"   # put a TLS-terminating reverse proxy in front (docs/DEPLOYMENT.md)
+    volumes:
+      - appdata:/data
+    networks: [backend]
+    read_only: true
+    tmpfs: ["/tmp"]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+
+volumes:
+  pgdata:
+  appdata:
+
+networks:
+  backend:

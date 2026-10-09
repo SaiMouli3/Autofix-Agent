@@ -1,0 +1,58 @@
+# Third-party licenses
+
+Synchronous Consulting AI depends on the open-source components below. Only the
+license of the agent runtime it is built on is reproduced in full; for all other
+packages consult the license file shipped inside each installed distribution
+(`pip show -f <pkg>` / `node_modules/<pkg>/LICENSE`).
+
+## OpenHands Software Agent SDK (openhands-sdk, openhands-tools, openhands-workspace 1.53.0) and the OpenHands agent-server container image
+
+Source: https://github.com/OpenHands/software-agent-sdk
+
+```
+MIT License
+
+Copyright (c) 2026 OpenHands contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+## Other direct dependencies
+
+| Component | License |
+|---|---|
+| FastAPI, Starlette, Uvicorn | MIT / BSD-3-Clause |
+| SQLAlchemy, Alembic | MIT |
+| LiteLLM (via the OpenHands SDK) | MIT |
+| FastMCP, MCP Python SDK | Apache-2.0 / MIT |
+| cryptography | Apache-2.0 OR BSD-3-Clause |
+| argon2-cffi | MIT |
+| httpx | BSD-3-Clause |
+| croniter | MIT |
+| pypdf | BSD-3-Clause |
+| python-docx | MIT |
+| beautifulsoup4 | MIT |
+| numpy | BSD-3-Clause |
+| psutil | BSD-3-Clause |
+| psycopg | LGPL-3.0 (dynamically linked, unmodified) |
+| React, React DOM | MIT |
+| React Router | MIT |
+| TanStack Query | MIT |
+| lucide-react | ISC |
+| Vite, TypeScript, Playwright | MIT / Apache-2.0 |
