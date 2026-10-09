@@ -482,3 +482,71 @@ def test_document_listing_and_preview(admin):
     assert item["uploaded_by_name"] == "Ada Admin" and item["source_name"] == "Preview Source" and item["type"] == "md"
     pv = admin.get(f"/api/knowledge/documents/{doc['id']}/preview").json()
     assert "Step one" in pv["passages"][0]["text"]
+
+
+class _Echo(BaseHTTPRequestHandler):
+    def log_message(self, *a):  # quiet
+        pass
+
+    def _reply(self):
+        n = int(self.headers.get("content-length", 0))
+        body = json.loads(self.rfile.read(n) or b"null")
+        out = json.dumps({"method": self.command, "path": self.path, "body": body}).encode()
+        self.send_response(200)
+        self.send_header("content-type", "application/json")
+        self.send_header("content-length", str(len(out)))
+        self.end_headers()
+        self.wfile.write(out)
+
+    do_GET = do_POST = _reply
+
+
+def test_connector_catalog_and_gateway_body_controls(admin):
+    from sca.db import session_scope
+    from sca.models import Integration
+    from sca.services.integrations import IntegrationError, call_operation
+
+    cat = {c["key"]: c for c in admin.get("/api/integrations/connectors").json()}
+    assert {"shopify_admin", "meta_marketing", "whatsapp_cloud", "meta_ads_mcp"} <= set(cat)
+    send = next(o for o in cat["whatsapp_cloud"]["operations"] if o["name"] == "send_text_message")
+    assert send["requires_approval"]
+
+    r = admin.post("/api/integrations/connectors/whatsapp_cloud",
+                   {"params": {"phone_number_id": "1098765432", "waba_id": "2233445566"},
+                    "credential": "EAAG-test-token-0123456789"})
+    assert r.status_code == 201, r.text
+    wa = r.json()
+    assert wa["status"] == "proposed" and wa["category"] == "communication" and wa["has_credential"]
+    assert wa["config"]["base_url"] == "https://graph.facebook.com/v26.0"
+    assert "EAAG-test-token" not in r.text
+    assert admin.post("/api/integrations/connectors/whatsapp_cloud", {"params": {"phone_number_id": "x"}}).status_code == 422
+    assert admin.post("/api/integrations/connectors/unknown", {"params": {}}).status_code == 404
+
+    # Gateway semantics the connectors rely on, exercised against a local echo server.
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), _Echo)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    cfg = {"base_url": f"http://127.0.0.1:{srv.server_port}", "operations": [
+        {"name": "send", "method": "POST", "path": "/messages", "requires_approval": True,
+         "fixed_body": {"messaging_product": "whatsapp", "type": "text"}},
+        {"name": "q", "method": "POST", "path": "/graphql.json", "graphql": "query"},
+        {"name": "lst", "method": "GET", "path": "/items", "default_query": {"fields": "id,name"}},
+    ]}
+    i = admin.post("/api/integrations", {"name": "echo", "type": "http", "config": cfg}).json()
+    assert admin.post(f"/api/integrations/{i['id']}/activate").status_code == 200
+    try:
+        with session_scope() as db:
+            integ = db.get(Integration, i["id"])
+            out = call_operation(db, integ, "send", {"to": "447700900123", "text": {"body": "hi"},
+                                                     "type": "template", "messaging_product": "sms"})
+            assert out["body"]["body"] == {"to": "447700900123", "text": {"body": "hi"},
+                                           "type": "text", "messaging_product": "whatsapp"}  # fixed fields win
+            out = call_operation(db, integ, "lst", {})
+            assert out["body"]["path"] == "/items?fields=id%2Cname"
+            out = call_operation(db, integ, "lst", {"fields": "id"})
+            assert out["body"]["path"] == "/items?fields=id"  # defaults are overridable
+            assert call_operation(db, integ, "q", {"query": "{ shop { name } }"})["ok"]
+            with pytest.raises(IntegrationError) as exc:
+                call_operation(db, integ, "q", {"query": 'mutation { productDelete(input: {id: "1"}) { deletedProductId } }'})
+            assert exc.value.code == "write_not_allowed"
+    finally:
+        srv.shutdown()

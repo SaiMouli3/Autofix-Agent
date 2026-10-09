@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2, FileJson, KeyRound, Plug, Plus, Power, ShieldCheck, Trash2, Wand2, X, XCircle } from "lucide-react";
+import { Blocks, CheckCircle2, ExternalLink, FileJson, KeyRound, Plug, Plus, Power, ShieldCheck, Trash2, Wand2, X, XCircle } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { Shell } from "../components/Shell";
@@ -29,7 +29,7 @@ export default function Integrations() {
   const cat = sp.get("cat") ?? "";
   const sel = sp.get("id") ?? "";
   const [q, setQ] = useState("");
-  const [modal, setModal] = useState<"" | "new" | "import">("");
+  const [modal, setModal] = useState<"" | "new" | "import" | "connectors">("");
   const [proposal, setProposal] = useState<any>(null);
   const integrations = useQuery({ queryKey: ["integrations"], queryFn: ({ signal }) => api.get("/api/integrations", signal), refetchInterval: 30000 });
   const providers = useQuery({ queryKey: ["providers"], queryFn: ({ signal }) => api.get("/api/providers", signal), refetchInterval: 30000 });
@@ -56,7 +56,8 @@ export default function Integrations() {
         {can("integrations:write") && (
           <div className="row">
             <button className="btn" onClick={() => setModal("import")}><Wand2 /> Import from docs</button>
-            <button className="btn primary" onClick={() => { setProposal(null); setModal("new"); }}><Plus /> Add integration</button>
+            <button className="btn" onClick={() => { setProposal(null); setModal("new"); }}><Plus /> Custom integration</button>
+            <button className="btn primary" onClick={() => setModal("connectors")}><Blocks /> Browse connectors</button>
           </div>
         )}
       </div>
@@ -74,8 +75,8 @@ export default function Integrations() {
           {integrations.isError && <div className="panel-body"><ErrorState error={integrations.error} onRetry={() => integrations.refetch()} what="integrations" /></div>}
           {integrations.data && providers.data && visible.length === 0 && (
             <Empty icon={Plug} title={rows.length ? "Nothing in this category" : "No integrations yet"}
-              action={can("integrations:write") && !rows.length ? <button className="btn primary" onClick={() => setModal("import")}><Wand2 /> Import an OpenAPI spec</button> : undefined}>
-              Register an HTTP API manually, from an OpenAPI document or from plain documentation, or connect an MCP server.
+              action={can("integrations:write") && !rows.length ? <button className="btn primary" onClick={() => setModal("connectors")}><Blocks /> Browse connectors</button> : undefined}>
+              Start from a prebuilt connector (Shopify, Meta Ads, WhatsApp), register any HTTP API from an OpenAPI document or plain documentation, or connect an MCP server.
             </Empty>
           )}
           {visible.length > 0 && (
@@ -105,6 +106,7 @@ export default function Integrations() {
         {current?.kind === "provider" && <ProviderDetail key={current.id} p={current.raw} onClose={close} />}
       </div>
       {modal === "new" && <IntegrationForm initial={proposal} onClose={() => setModal("")} onCreated={(id) => { setModal(""); open(id); }} />}
+      {modal === "connectors" && <ConnectorGallery onClose={() => setModal("")} onCreated={(id) => { setModal(""); open(id); }} />}
       {modal === "import" && <ImportDialog onClose={() => setModal("")} onProposal={(p) => { setProposal(p); setModal("new"); }} />}
     </Shell>
   );
@@ -214,10 +216,10 @@ function IntegrationDetail({ id, onClose }: { id: string; onClose: () => void })
             <thead><tr><th scope="col">Operation</th><th scope="col">Enabled</th><th scope="col">Approval</th></tr></thead>
             <tbody>{ops.map((o: any) => (
               <tr key={o.name}>
-                <td><div className="row" style={{ gap: 6 }}><Tag tone={o.method === "GET" ? "" : o.destructive ? "danger" : "warning"} mono>{o.method}</Tag><b className="small">{o.name}</b></div>
+                <td><div className="row" style={{ gap: 6 }}><Tag tone={!opWrites(o) ? "" : o.destructive ? "danger" : "warning"} mono>{o.graphql ? `GraphQL ${o.graphql}` : o.method}</Tag><b className="small">{o.name}</b></div>
                   <div className="tiny muted mono ellipsis" style={{ maxWidth: 220 }}>{o.path}</div></td>
                 <td><input type="checkbox" checked={o.enabled} disabled={!write} aria-label={`Enable ${o.name}`} onChange={async () => {
-                  if (!o.enabled && o.method !== "GET" && !(await confirm({ title: `Enable ${o.method} ${o.name}?`, body: "This operation can change data in the external system. Each call will still wait for human approval.", confirmLabel: "Enable" }))) return;
+                  if (!o.enabled && opWrites(o) && !(await confirm({ title: `Enable ${o.graphql ? "GraphQL mutation" : o.method} ${o.name}?`, body: "This operation can change data in the external system. Each call will still wait for human approval.", confirmLabel: "Enable" }))) return;
                   saveOps.mutate(ops.map((x: any) => (x.name === o.name ? { ...x, enabled: !x.enabled } : x)));
                 }} /></td>
                 <td>{o.destructive ? <Tag tone="danger">always</Tag> : <input type="checkbox" checked={o.requires_approval} disabled={!write} aria-label={`Require approval for ${o.name}`} onChange={() => saveOps.mutate(ops.map((x: any) => (x.name === o.name ? { ...x, requires_approval: !x.requires_approval } : x)))} />}</td>
@@ -393,6 +395,102 @@ function ImportDialog({ onClose, onProposal }: { onClose: () => void; onProposal
           <Alert kind="info">{result.note}</Alert>
         </div>
       )}
+    </Dialog>
+  );
+}
+
+/** Whether an operation can change data in the external system (GraphQL queries are read-only). */
+function opWrites(o: any) {
+  return o.graphql ? o.graphql !== "query" : o.method !== "GET";
+}
+
+// ------------------------------------------------------------------ prebuilt connectors
+
+function ConnectorGallery({ onClose, onCreated }: { onClose: () => void; onCreated: (id: string) => void }) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const list = useQuery({ queryKey: ["connectors"], queryFn: ({ signal }) => api.get("/api/integrations/connectors", signal) });
+  const [pick, setPick] = useState<any>(null);
+  const [values, setValues] = useState<Record<string, string>>({});
+  const [credential, setCredential] = useState("");
+  const [touched, setTouched] = useState(false);
+  const errors: Record<string, string> = {};
+  for (const p of pick?.params ?? []) {
+    const v = (values[p.key] ?? p.default ?? "").trim();
+    if (!v) errors[p.key] = `${p.label} is required.`;
+  }
+  const create = useMutation({
+    mutationFn: () => api.post(`/api/integrations/connectors/${pick.key}`, {
+      params: Object.fromEntries((pick.params ?? []).map((p: any) => [p.key, (values[p.key] ?? p.default ?? "").trim()])),
+      credential: credential || null,
+    }),
+    onSuccess: (i) => {
+      qc.invalidateQueries({ queryKey: ["integrations"] });
+      toast("ok", `${i.name} added as proposed. Run a connection test, review its operations, then activate it.`);
+      onCreated(i.id);
+    },
+  });
+  const choose = (c: any) => { setPick(c); setValues({}); setCredential(""); setTouched(false); create.reset(); };
+  if (!pick) {
+    return (
+      <Dialog size="wide" title="Connectors" description="Prebuilt definitions for common business systems. Each one is added as a proposed integration: nothing is connected until a live test passes and an administrator activates it." onClose={onClose}>
+        {list.isLoading && <SkeletonRows rows={4} />}
+        <ErrorState error={list.error} onRetry={() => list.refetch()} what="connectors" />
+        <div className="grid cols-2" style={{ gap: 10 }}>
+          {(list.data ?? []).map((c: any) => (
+            <button key={c.key} type="button" className="choice" disabled={!c.available} onClick={() => choose(c)} style={{ flexDirection: "column", alignItems: "stretch", gap: 4, textAlign: "left" }}>
+              <span className="row between"><b className="small">{c.name}</b><span className="row" style={{ gap: 4 }}><Tag tone="outline">{c.vendor}</Tag><Tag>{c.type === "mcp" ? "MCP server" : "HTTP API"}</Tag></span></span>
+              <span className="small muted">{c.summary}</span>
+              {c.operations && <span className="tiny muted">{c.operations.filter((o: any) => o.read_only).length} read · {c.operations.filter((o: any) => !o.read_only).length} change (approval required)</span>}
+              {!c.available && <span className="tiny" style={{ color: "var(--warning)" }}>{c.unavailable_reason}</span>}
+            </button>
+          ))}
+        </div>
+      </Dialog>
+    );
+  }
+  return (
+    <Dialog size="wide" title={`Connect ${pick.name}`} description={pick.summary} onClose={onClose}
+      footer={<><button className="btn" onClick={() => setPick(null)}>Back</button>
+        <button className="btn dark" disabled={create.isPending} onClick={() => { setTouched(true); if (!Object.keys(errors).length) create.mutate(); }}>{create.isPending ? "Adding…" : "Add as proposed"}</button></>}>
+      <div className="stack">
+        {pick.notes && <Alert kind="info">{pick.notes}</Alert>}
+        {(pick.params ?? []).length > 0 && (
+          <div className="form-grid">
+            {pick.params.map((p: any) => (
+              <label key={p.key} className="field"><span className="req">{p.label}</span>
+                <input value={values[p.key] ?? p.default ?? ""} aria-invalid={touched && !!errors[p.key]} onChange={(e) => setValues({ ...values, [p.key]: e.target.value })} autoComplete="off" />
+                {touched && errors[p.key] ? <span className="err">{errors[p.key]}</span> : p.help && <span className="help">{p.help}</span>}
+              </label>
+            ))}
+          </div>
+        )}
+        {pick.credential && (
+          <label className="field">{pick.credential.label}
+            <input type="password" autoComplete="off" value={credential} onChange={(e) => setCredential(e.target.value)} />
+            <span className="help">{pick.credential.help} Stored encrypted; agents never see it. You can also add it later.</span>
+          </label>
+        )}
+        {pick.operations && (
+          <div>
+            <div className="section-title">Operations</div>
+            <div className="table-wrap">
+              <table className="table">
+                <thead><tr><th scope="col">Operation</th><th scope="col">Access</th><th scope="col">Initially</th></tr></thead>
+                <tbody>{pick.operations.map((o: any) => (
+                  <tr key={o.name}>
+                    <td><b className="small mono">{o.name}</b><div className="tiny muted">{o.description}</div></td>
+                    <td className="nowrap">{o.read_only ? <Tag>Read</Tag> : <Tag tone="warning">Change · approval</Tag>}</td>
+                    <td className="small nowrap">{o.enabled ? "Enabled" : "Disabled"}</td>
+                  </tr>
+                ))}</tbody>
+              </table>
+            </div>
+          </div>
+        )}
+        <p className="tiny muted" style={{ margin: 0 }}><a href={pick.docs_url} target="_blank" rel="noreferrer noopener" style={{ color: "var(--accent)" }}>{pick.vendor} documentation <ExternalLink size={11} style={{ verticalAlign: -1 }} /></a></p>
+        <InlineError error={create.error} />
+      </div>
     </Dialog>
   );
 }

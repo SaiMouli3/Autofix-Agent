@@ -25,6 +25,7 @@ observability and the web UI.
 | Governance | Human approval gates (park conversation → approve/reject → resume), budgets, tool-call limits, four-eyes option |
 | Delegation | Agent → agent sub-tasks with allow-lists, depth limits, cycle detection, separate tools/workspace |
 | Knowledge | Upload PDF/DOCX/MD/TXT/HTML/CSV/JSON, chunking, hybrid BM25 + embedding retrieval, per-agent access, cited references |
+| Connectors | Prebuilt Shopify Admin (GraphQL), Meta Ads (Marketing API), WhatsApp Business (Cloud API), Meta Ads MCP and Shopify Dev MCP — see [docs/CONNECTORS.md](docs/CONNECTORS.md) |
 | Integrations | HTTP API gateway (credential injection, SSRF guard, size/time/rate limits, audit), MCP servers, OpenAPI and natural-language import with review |
 | Scheduling | One-time, cron (time-zone aware, missed-run policy), HMAC-signed webhooks with replay protection and dedupe |
 | Security | Argon2id, server-side sessions, CSRF, RBAC (5 roles), tenant scoping, Fernet-encrypted secrets, redaction, hash-chained audit log |
@@ -78,7 +79,7 @@ published per-token rates. OpenAI, Anthropic and any other OpenAI-compatible end
 ## Tests
 
 ```bash
-cd backend && pytest -m "not live and not docker"     # 48 offline tests (SQLite; set SCA_DATABASE_URL for Postgres)
+cd backend && pytest -m "not live and not docker"     # 51 offline tests (SQLite; set SCA_DATABASE_URL for Postgres)
 EXP_LABS_API_KEY=... pytest -m live                    # 8 tests on the real runtime + real provider
 EXP_LABS_API_KEY=... ../scripts/e2e.sh                 # Playwright browser flow (fresh instance)
 cd frontend && npm run test:ui                         # MOCKED UI-state tests (no backend; fixtures only)

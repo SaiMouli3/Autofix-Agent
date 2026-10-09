@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from sca.api.deps import Principal, require, scoped
 from sca.db import get_db
 from sca.agent_config import AgentConfig
+from sca.connectors import ConnectorError, instantiate, public_catalog
 from sca.models import Agent, AgentVersion, AuditEvent, Integration, Secret
 from sca.services import audit
 from sca.services.integrations import (
@@ -96,23 +97,56 @@ def list_integrations(p: Principal = Depends(require("integrations:read")), db: 
     return [_out(db, i) for i in rows]
 
 
+class ConnectorIn(BaseModel):
+    params: dict[str, str] = Field(default_factory=dict)
+    name: str | None = Field(default=None, min_length=2, max_length=80, pattern=r"^[A-Za-z0-9][A-Za-z0-9 _.\-]*$")
+    credential: str | None = Field(default=None, max_length=4000)
+
+
+@router.get("/connectors")
+def list_connectors(p: Principal = Depends(require("integrations:read"))):
+    return public_catalog()
+
+
+@router.post("/connectors/{key}", status_code=201)
+def create_from_connector(key: str, body: ConnectorIn, p: Principal = Depends(require("integrations:write")),
+                          db: Session = Depends(get_db)):
+    """Create a proposed integration from a prebuilt connector. It still needs a live test and activation."""
+    try:
+        spec = instantiate(key, body.params)
+    except ConnectorError as exc:
+        raise HTTPException(404 if str(exc).startswith("unknown connector") else 422, str(exc)) from exc
+    i = _create(db, p, name=body.name or spec["name"], description=spec["description"], kind=spec["type"],
+                category=spec["category"], config=spec["config"], credential=body.credential,
+                details={"connector": key})
+    db.commit()
+    return _out(db, i, detail=True)
+
+
+def _create(db: Session, p: Principal, *, name: str, description: str, kind: str, category: str,
+            config: dict[str, Any], credential: str | None, details: dict[str, Any] | None = None) -> Integration:
+    if db.execute(select(Integration).where(Integration.org_id == p.org_id, Integration.name == name)).first():
+        raise HTTPException(409, "an integration with this name already exists")
+    try:
+        cfg = validate_config(kind, config)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(422, str(exc)) from exc
+    i = Integration(org_id=p.org_id, name=name, description=description, type=kind,
+                    category=category, config=cfg, status="proposed", created_by=p.user_id)
+    db.add(i)
+    db.flush()
+    if credential:
+        i.secret_id = put_secret(db, p.org_id, f"integration:{i.id}", "integration", credential, p.user_id).id
+    audit.record(db, p.org_id, "integration.created", actor_id=p.user_id, target_type="integration", target_id=i.id,
+                 details={"name": i.name, "type": i.type, **(details or {})})
+    return i
+
+
 @router.post("", status_code=201)
 def create_integration(body: IntegrationIn, p: Principal = Depends(require("integrations:write")),
                        db: Session = Depends(get_db)):
-    if db.execute(select(Integration).where(Integration.org_id == p.org_id, Integration.name == body.name)).first():
-        raise HTTPException(409, "an integration with this name already exists")
-    try:
-        cfg = validate_config(body.type, body.config)
-    except Exception as exc:  # noqa: BLE001
-        raise HTTPException(422, str(exc)) from exc
-    i = Integration(org_id=p.org_id, name=body.name, description=body.description, type=body.type,
-                    category=body.category, config=cfg, status="proposed", created_by=p.user_id)
-    db.add(i)
-    db.flush()
-    if body.credential:
-        i.secret_id = put_secret(db, p.org_id, f"integration:{i.id}", "integration", body.credential, p.user_id).id
-    audit.record(db, p.org_id, "integration.created", actor_id=p.user_id, target_type="integration", target_id=i.id,
-                 details={"name": i.name, "type": i.type})
+    i = _create(db, p, name=body.name, description=body.description, kind=body.type, category=body.category,
+                config=body.config, credential=body.credential)
     db.commit()
     return _out(db, i, detail=True)
 

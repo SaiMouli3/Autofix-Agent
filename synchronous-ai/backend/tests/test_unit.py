@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 
 import pytest
@@ -125,8 +126,6 @@ def test_openapi_import_disables_writes_and_reports():
             "paths": {"/c/{id}": {"get": {"operationId": "getC", "parameters": [
                 {"name": "id", "in": "path", "required": True, "schema": {"type": "string"}}]},
                 "delete": {"operationId": "delC"}}}}
-    import json
-
     prop = proposal_from_openapi(json.dumps(spec))
     ops = {o["name"]: o for o in prop["config"]["operations"]}
     assert ops["getC"]["enabled"] and not ops["delC"]["enabled"] and ops["delC"]["destructive"]
@@ -142,3 +141,53 @@ def test_chunking_overlaps_and_bounds():
     text = "\n\n".join(f"Paragraph {i} " + ("word " * 80) for i in range(20))
     chunks = chunk_text(text)
     assert len(chunks) > 3 and all(len(c) <= 1400 + 200 for c in chunks)
+
+
+# ----------------------------------------------------------------- prebuilt connectors
+
+
+def test_graphql_read_only_guard():
+    from sca.services.integrations import is_read_only_graphql
+
+    assert is_read_only_graphql("{ shop { name } }")
+    assert is_read_only_graphql('query Q($id: ID!) { product(id: $id) { title } }')
+    assert is_read_only_graphql('{ products(query: "title:mutation") { nodes { id } } }')  # inside a string
+    assert is_read_only_graphql("# mutation in a comment\n{ shop { name } }")
+    assert not is_read_only_graphql('mutation { productDelete(input: {id: "1"}) { deletedProductId } }')
+    assert not is_read_only_graphql("query A { a }\nmutation B { b }")  # second operation smuggled in
+    assert not is_read_only_graphql("{ shop { name } } mutation X { a }")
+    assert not is_read_only_graphql("subscription { orders { id } }")
+
+
+def test_connectors_instantiate_and_validate():
+    from sca.connectors import CONNECTORS, ConnectorError, instantiate, public_catalog
+
+    params = {"shopify_admin": {"shop": "https://Acme-Store.myshopify.com/admin"},
+              "meta_marketing": {"ad_account_id": "act_1234567890"},
+              "whatsapp_cloud": {"phone_number_id": "1098765432", "waba_id": "2233445566"}}
+    for c in CONNECTORS:
+        if c["type"] != "http":
+            continue
+        spec = instantiate(c["key"], params[c["key"]])
+        cfg = validate_config("http", spec["config"])
+        assert "{{" not in json.dumps(cfg)
+        assert all(x["ok"] for x in validation_report("http", spec["config"])), c["key"]
+        for op in cfg["operations"]:
+            # Every operation that can change external data waits for a human.
+            if op["method"] != "GET" and op.get("graphql") != "query":
+                assert op["requires_approval"], (c["key"], op["name"])
+    shop = instantiate("shopify_admin", params["shopify_admin"])["config"]
+    assert shop["base_url"] == "https://acme-store.myshopify.com/admin/api/2026-07"
+    meta = instantiate("meta_marketing", params["meta_marketing"])["config"]
+    assert meta["health_check_path"].startswith("/act_1234567890?")
+    mcp = instantiate("meta_ads_mcp", {})
+    assert mcp["type"] == "mcp" and validate_config("mcp", mcp["config"])["url"] == "https://mcp.facebook.com/ads"
+    with pytest.raises(ConnectorError):
+        instantiate("shopify_admin", {"shop": "evil.com/x?"})
+    with pytest.raises(ConnectorError):
+        instantiate("meta_marketing", {"ad_account_id": "123", "base_url": "https://evil"})
+    with pytest.raises(ConnectorError):
+        instantiate("nope", {})
+    cat = {c["key"]: c for c in public_catalog()}
+    assert cat["shopify_dev_mcp"]["available"] is False  # stdio MCP is off by default
+    assert all("shpat_" not in json.dumps(c["config"]) for c in CONNECTORS)

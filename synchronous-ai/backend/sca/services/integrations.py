@@ -39,6 +39,13 @@ class Operation(BaseModel):
     destructive: bool = False
     requires_approval: bool = False
     enabled: bool = True
+    # GraphQL endpoints: "query" operations are read-only and the gateway rejects any document
+    # that contains a mutation or subscription; "mutation" operations are writes.
+    graphql: Literal["query", "mutation"] | None = None
+    # Body fields set by the platform; agent-supplied values for these keys are ignored.
+    fixed_body: dict[str, Any] = Field(default_factory=dict)
+    # Query parameters sent unless the agent supplies its own value.
+    default_query: dict[str, str] = Field(default_factory=dict)
 
     @field_validator("path")
     @classmethod
@@ -94,6 +101,8 @@ def validate_config(kind: str, config: dict[str, Any]) -> dict[str, Any]:
         if len(names) != len(set(names)):
             raise ValueError("operation names must be unique")
         for op in cfg.operations:
+            if op.graphql and op.method != "POST":
+                raise ValueError(f"GraphQL operation '{op.name}' must use POST")
             if op.method == "DELETE":
                 op.destructive = True
             if op.destructive or op.method in WRITE_METHODS:
@@ -165,6 +174,28 @@ def _validate_args(op: Operation, args: dict[str, Any]) -> None:
             raise IntegrationError("invalid_arguments", f"unexpected arguments: {sorted(extra)}")
 
 
+_GQL_NOISE = re.compile(r'"""[\s\S]*?"""|"(?:\\.|[^"\\])*"|#[^\n]*')
+_GQL_WRITE = re.compile(r"(?:^|[\s{}),])(mutation|subscription)(?=[\s({@]|$)")
+
+
+def is_read_only_graphql(document: str) -> bool:
+    """True when a GraphQL document contains no mutation or subscription operation.
+
+    Strings and comments are stripped first so a literal like "mutation" inside a search term
+    does not count. The check errs on the side of rejecting: field names spelled exactly
+    ``mutation``/``subscription`` are treated as writes.
+    """
+    return _GQL_WRITE.search(_GQL_NOISE.sub(" ", document)) is None
+
+
+def is_write(op: Operation | dict[str, Any]) -> bool:
+    """Whether an operation can change data in the external system."""
+    o = op if isinstance(op, dict) else op.model_dump()
+    if o.get("graphql") == "query":
+        return False
+    return o["method"] in WRITE_METHODS
+
+
 def call_operation(db: Session, integ: Integration, op_name: str, args: dict[str, Any]) -> dict[str, Any]:
     if integ.type != "http":
         raise IntegrationError("unsupported", "only HTTP integrations are callable through the gateway")
@@ -189,11 +220,27 @@ def call_operation(db: Session, integ: Integration, op_name: str, args: dict[str
     headers = {**cfg.default_headers, **headers, "User-Agent": "SynchronousConsultingAI/0.1"}
     rest = {k: v for k, v in args.items() if k not in used}
     body = rest.pop("body", None)
-    query = rest.pop("query", None) or {}
+    # GraphQL operations take {query, variables} as the JSON body; "query" is the document,
+    # not URL query parameters.
+    query = {} if op.graphql else (rest.pop("query", None) or {})
+    if not isinstance(query, dict):
+        raise IntegrationError("invalid_arguments", "'query' must be an object")
     if op.method == "GET":
         query = {**rest, **query}
     elif body is None and rest:
         body = rest
+    query = {**op.default_query, **query}
+    if op.fixed_body:
+        if body is not None and not isinstance(body, dict):
+            raise IntegrationError("invalid_arguments", "'body' must be an object for this operation")
+        body = {**(body or {}), **op.fixed_body}
+    if op.graphql:
+        doc = (body or {}).get("query") if isinstance(body, dict) else None
+        if not isinstance(doc, str) or not doc.strip():
+            raise IntegrationError("invalid_arguments", "GraphQL operations need a 'query' document string")
+        if op.graphql == "query" and not is_read_only_graphql(doc):
+            raise IntegrationError("write_not_allowed",
+                                   f"operation '{op.name}' is read-only; use the mutation operation for changes")
     params.update({k: str(v) for k, v in query.items()})
     max_bytes = get_settings().integration_max_response_bytes
     t0 = time.monotonic()
@@ -417,7 +464,7 @@ def validation_report(kind: str, config: dict[str, Any]) -> list[dict[str, Any]]
             missing = placeholders - declared
             add(f"op:{op['name']}:path_params", not missing,
                 f"undeclared path parameters: {sorted(missing)}" if missing else "path parameters declared")
-            if op["method"] in WRITE_METHODS:
+            if is_write(op):
                 add(f"op:{op['name']}:write_guard", op["requires_approval"] or not op["enabled"],
                     "write operation requires approval" if op["requires_approval"]
                     else "write operation is enabled WITHOUT approval", severity="warning")

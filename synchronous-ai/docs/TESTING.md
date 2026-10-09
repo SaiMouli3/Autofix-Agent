@@ -57,7 +57,8 @@ absent from the JS/CSS bundle, API responses and the server log.
 
 | Suite | Result |
 |---|---|
-| Unit + offline integration, SQLite | **48 passed** (28.1 s) |
+| Unit + offline integration, SQLite | **51 passed** (31.7 s) |
+| Connector *Test connection* against live Shopify, Meta Graph and Meta Ads MCP endpoints (invalid token) | all 4 reached the vendor and reported HTTP 401 as failed |
 | Browser E2E through the redesigned UI, Experiential Labs | **1 passed** (24.7 s) |
 | Mocked UI-state tests | **9 passed** (9.7 s) |
 | `ruff` (CI error classes) | clean |
