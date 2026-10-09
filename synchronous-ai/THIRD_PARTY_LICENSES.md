@@ -55,4 +55,15 @@ SOFTWARE.
 | React Router | MIT |
 | TanStack Query | MIT |
 | lucide-react | ISC |
+| Inter, JetBrains Mono (self-hosted via @fontsource-variable) | SIL Open Font License 1.1 |
+| Simple Icons 16.32.0 (connector logos, bundled) | CC0-1.0 |
 | Vite, TypeScript, Playwright | MIT / Apache-2.0 |
+
+### Brand logos
+
+Connector logos come from Simple Icons, CC0-1.0. The logos themselves are trademarks of their
+respective owners: Google, Meta, Shopify, SAP, HubSpot, Atlassian, GitHub, Stripe, Notion, Airtable,
+Zendesk and others. They are shown only to identify the service a connector connects to. This does
+not imply endorsement or affiliation. Each owner's brand guidelines apply; Simple Icons links them
+per icon. Brands whose owners asked Simple Icons to remove their marks (for example Salesforce,
+Microsoft and Slack) are deliberately not shown, and use a neutral monogram instead.

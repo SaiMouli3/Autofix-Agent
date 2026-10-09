@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Blocks, CheckCircle2, ExternalLink, FileJson, KeyRound, Plug, Plus, Power, ShieldCheck, Trash2, Wand2, X, XCircle } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
+import { BrandLogo } from "../components/BrandLogo";
 import { Shell } from "../components/Shell";
 import { Alert, Dialog, Empty, ErrorState, InlineError, KV, SearchField, SkeletonRows, Status, Tabs, Tag, useConfirm, useToast } from "../components/ui";
 import { api } from "../lib/api";
@@ -103,8 +104,13 @@ export default function Integrations() {
                   {visible.map((r) => (
                     <tr key={r.id} className={`click ${r.id === sel ? "sel" : ""}`} onClick={() => open(r.id)}>
                       <td className="title-cell">
+                        <span className="row" style={{ gap: 10, alignItems: "flex-start" }}>
+                        <BrandLogo connectorKey={r.raw?.connector_key} name={r.name} vendor={r.kind === "provider" ? r.raw?.kind_label : r.name} size={28} />
+                        <span style={{ minWidth: 0 }}>
                         <button className="disclose strong" style={{ color: "var(--ink)", fontSize: 13 }} onClick={(e) => { e.stopPropagation(); open(r.id); }}>{r.name}</button>
                         <div className="tiny muted ellipsis">{CAT_LABEL[r.cat]}{r.error ? ` · ${r.error}` : r.desc ? ` · ${r.desc}` : ""}</div>
+                        </span>
+                        </span>
                       </td>
                       <td><Status status={r.state} /></td>
                       <td className="small hide-sm">{r.auth}</td>
@@ -189,7 +195,8 @@ function IntegrationDetail({ id, onClose }: { id: string; onClose: () => void })
   return (
     <aside className="panel" aria-label={`${i.name} details`}>
       <div className="panel-head">
-        <div style={{ minWidth: 0 }}><h2 className="ellipsis">{i.name}</h2><div className="tiny muted">{i.type === "mcp" ? "MCP server" : "HTTP API"} · {i.description || "No description"}</div></div>
+        <BrandLogo connectorKey={i.connector_key} name={i.name} size={32} />
+        <div className="grow" style={{ minWidth: 0 }}><h2 className="ellipsis">{i.name}</h2><div className="tiny muted">{i.type === "mcp" ? "MCP server" : "HTTP API"} · {i.description || "No description"}</div></div>
         <button className="btn ghost icon sm" onClick={onClose} aria-label="Close"><X /></button>
       </div>
       <div className="panel-body stack">
@@ -460,6 +467,8 @@ function ConnectorGallery({ onClose, onCreated, onImport, onCustom }: { onClose:
       footer={<><button className="btn" onClick={() => setPick(null)}>Back</button>
         <button className="btn dark" disabled={create.isPending} onClick={() => { setTouched(true); if (!Object.keys(errors).length) create.mutate(); }}>{create.isPending ? "Adding…" : "Add as proposed"}</button></>}>
       <div className="stack">
+        <div className="row" style={{ gap: 10 }}><BrandLogo connectorKey={pick.key} name={pick.name} vendor={pick.vendor} size={40} />
+          <div><b>{pick.name}</b><div className="tiny muted">{pick.vendor} · {pick.type === "mcp" ? "MCP server" : "API"}{pick.auth === "oauth2" ? " · one-click sign-in" : ""}</div></div></div>
         {pick.notes && <Alert kind="info">{pick.notes}</Alert>}
         {(pick.params ?? []).length > 0 && (
           <div className="form-grid">
@@ -577,17 +586,6 @@ function OAuthPanel({ i, write, onChanged }: { i: any; write: boolean; onChanged
 
 // ------------------------------------------------------------------ connector browser
 
-const MONO_COLORS = ["#C65D32", "#4776A8", "#27845A", "#7A5BA6", "#9A6417", "#2F7F86", "#A04F6B", "#5B615C"];
-
-/** Neutral monogram instead of vendor logos: no third-party brand assets are bundled or fetched. */
-function Monogram({ name, vendor }: { name: string; vendor: string }) {
-  let h = 0;
-  for (const ch of vendor) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
-  const words = name.replace(/[^A-Za-z0-9 ]/g, " ").split(/\s+/).filter(Boolean);
-  const letters = (words.length > 1 ? words[0][0] + words[1][0] : name.slice(0, 2)).toUpperCase();
-  return <span className="conn-logo" style={{ background: MONO_COLORS[h % MONO_COLORS.length] }} aria-hidden>{letters}</span>;
-}
-
 function ConnectorCard({ c, onPick, reason }: { c: any; onPick: (c: any) => void; reason?: string | null }) {
   const reads = c.operations?.filter((o: any) => o.read_only).length ?? 0;
   const changes = c.operations ? c.operations.length - reads : 0;
@@ -596,7 +594,7 @@ function ConnectorCard({ c, onPick, reason }: { c: any; onPick: (c: any) => void
     <button type="button" className="conn-card" disabled={!c.available} onClick={() => onPick(c)}
       aria-label={`${c.name} by ${c.vendor}${added ? ", already added" : ""}`}>
       <span className="row" style={{ gap: 10, alignItems: "flex-start" }}>
-        <Monogram name={c.name} vendor={c.vendor} />
+        <BrandLogo connectorKey={c.key} name={c.name} vendor={c.vendor} />
         <span className="grow" style={{ minWidth: 0 }}>
           <span className="row between" style={{ gap: 6 }}>
             <b className="small ellipsis">{c.name}</b>

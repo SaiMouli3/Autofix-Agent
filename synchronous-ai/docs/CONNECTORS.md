@@ -9,7 +9,10 @@
   commerce, marketing, ERP and data. There's also a search box.
 - **Status:** a connector already in use shows **Added** or **Connected**.
 
-Tiles use neutral monograms; no vendor logos are bundled or fetched. Choosing a connector creates
+Tiles show the vendor's logo from Simple Icons (CC0). The logos are bundled with the app, nothing is
+fetched from vendors, and they appear only to identify the service. Brands whose owners asked for
+removal from Simple Icons (Salesforce, Microsoft, Slack) get a neutral monogram instead; see
+THIRD_PARTY_LICENSES.md. Choosing a connector creates
 an integration from its vetted definition. Every connector
 is added as **proposed**. An administrator then attaches the credential, runs **Test connection**
 (a live request to the vendor), reviews which operations are enabled, assigns agents and activates it.
