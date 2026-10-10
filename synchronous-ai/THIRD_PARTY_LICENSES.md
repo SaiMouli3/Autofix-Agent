@@ -48,6 +48,8 @@ SOFTWARE.
 | pypdf | BSD-3-Clause |
 | python-docx | MIT |
 | beautifulsoup4 | MIT |
+| openpyxl | MIT |
+| Pillow | MIT-CMU (HPND) |
 | numpy | BSD-3-Clause |
 | psutil | BSD-3-Clause |
 | psycopg | LGPL-3.0 (dynamically linked, unmodified) |
