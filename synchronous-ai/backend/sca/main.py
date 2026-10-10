@@ -122,6 +122,7 @@ def create_app() -> FastAPI:
     from sca.api import (
         admin,
         agents,
+        attachments,
         approvals,
         auth,
         dashboard,
@@ -133,7 +134,7 @@ def create_app() -> FastAPI:
         websearch,
     )
 
-    for r in (auth, agents, tasks, approvals, providers, integrations, knowledge, schedules, admin, dashboard, websearch):
+    for r in (auth, agents, attachments, tasks, approvals, providers, integrations, knowledge, schedules, admin, dashboard, websearch):
         app.include_router(r.router)
     app.include_router(integrations.oauth_router)
 

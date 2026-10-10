@@ -321,6 +321,23 @@ class Artifact(Base):
     created_at: Mapped[datetime] = _created()
 
 
+class Attachment(Base):
+    """A file a user attached to a task (document or image). Uploaded first, linked on submit."""
+
+    __tablename__ = "attachments"
+    id: Mapped[str] = _pk()
+    org_id: Mapped[str] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), index=True)
+    uploaded_by: Mapped[str] = mapped_column(String(32))
+    task_id: Mapped[str | None] = mapped_column(ForeignKey("tasks.id", ondelete="CASCADE"), nullable=True, index=True)
+    filename: Mapped[str] = mapped_column(String(255))
+    kind: Mapped[str] = mapped_column(String(20))  # document | image
+    mime: Mapped[str] = mapped_column(String(120))
+    size: Mapped[int] = mapped_column(BigInteger)
+    sha256: Mapped[str] = mapped_column(String(64))
+    text_chars: Mapped[int] = mapped_column(Integer, default=0)  # extracted text length (documents)
+    created_at: Mapped[datetime] = _created()
+
+
 class UsageRecord(Base):
     __tablename__ = "usage_records"
     id: Mapped[str] = _pk()

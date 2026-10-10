@@ -3,6 +3,7 @@ import { Ban, GitBranch, RotateCcw } from "lucide-react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { BotMark } from "../components/BotMark";
 import { FilesBrowser } from "../components/FilesBrowser";
+import { AttachmentList } from "../components/Attachments";
 import { Markdown } from "../components/Markdown";
 import { Shell } from "../components/Shell";
 import { Timeline } from "../components/Timeline";
@@ -88,7 +89,8 @@ export default function TaskDetail() {
             )}
             {tab === "result" && (
               <div className="panel-body stack">
-                <div><div className="section-title">Instructions</div><div className="prose">{t.instructions}</div></div>
+                <div><div className="section-title">Instructions</div><div className="prose">{t.instructions}</div>
+                  {t.attachments?.length > 0 && <><div className="section-title mt12">Attachments</div><AttachmentList items={t.attachments} /></>}</div>
                 <div><div className="section-title">Result</div>{t.result_summary ? <Markdown>{t.result_summary}</Markdown> : <p className="muted small">{active ? "The agent is still working." : "No written result."}</p>}</div>
               </div>
             )}

@@ -32,7 +32,7 @@ from sca.models import (
 )
 from sca.orchestrator import executor
 from sca.orchestrator.dispatcher import get_orchestrator
-from sca.services import audit
+from sca.services import attachments, audit
 from sca.services.tasks import SubmissionError, submit_task
 
 router = APIRouter(prefix="/api", tags=["tasks"])
@@ -43,6 +43,7 @@ class TaskIn(BaseModel):
     title: str | None = Field(default=None, max_length=200)
     priority: int = Field(default=5, ge=1, le=10)
     session_id: str | None = None
+    attachment_ids: list[str] = Field(default_factory=list, max_length=10)
 
 
 PROVIDER_ERRORS = {"auth_failed", "rate_limited", "provider_unavailable", "network_error", "timeout_provider",
@@ -88,6 +89,7 @@ def task_out(db: Session, t: Task, detail: bool = False) -> dict[str, Any]:
         "cancel_requested": t.cancel_requested, "scheduled_for": t.scheduled_for,
         "requested_by_name": requester.name if requester else None,
         "error_category": error_category(t.error, t.status),
+        "attachments": [attachments.public(a) for a in attachments.for_task(db, t.id)],
     }
     if detail:
         out["instructions"] = t.instructions
@@ -116,7 +118,9 @@ def create_task(agent_id: str, body: TaskIn, p: Principal = Depends(require("tas
                                     requested_by=p.user_id, priority=body.priority,
                                     idempotency_key=f"user:{idempotency_key}" if idempotency_key else None,
                                     session_id=body.session_id)
-    except SubmissionError as exc:
+        if created and body.attachment_ids:
+            attachments.link(db, p.org_id, p.user_id, body.attachment_ids, task)
+    except (SubmissionError, attachments.AttachmentError) as exc:
         raise HTTPException(422, str(exc)) from exc
     db.commit()
     get_orchestrator().wake()

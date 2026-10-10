@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { AttachButton, AttachmentList, PendingAttachments, useAttachments } from "../components/Attachments";
 import { BotMark } from "../components/BotMark";
 import { Markdown } from "../components/Markdown";
 import { Shell, useLive } from "../components/Shell";
@@ -281,6 +282,7 @@ function Turn({ t, agent, selected, onSelect }: { t: any; agent: any; selected: 
           <div className="body prose">{long && !expanded ? `${instructions.slice(0, 600)}…` : instructions}
             {long && <button className="disclose" style={{ display: "block", marginTop: 4 }} onClick={() => setExpanded(!expanded)}>{expanded ? "Show less" : "Show full instructions"}</button>}
           </div>
+          <AttachmentList items={d.attachments ?? t.attachments} />
         </div>
       </div>
       <div className="msg-agent">
@@ -415,24 +417,36 @@ function Composer({ agent, sessionId, continuable, busy, textareaRef, onSubmitte
   const toast = useToast();
   const [text, setText] = useState("");
   const [priority, setPriority] = useState(5);
+  const [dragging, setDragging] = useState(false);
+  const files = useAttachments();
   const submit = useMutation({
-    mutationFn: () => api.post(`/api/agents/${agent.id}/tasks`, { instructions: text.trim(), priority, session_id: sessionId && continuable ? sessionId : null }, { "Idempotency-Key": crypto.randomUUID() }),
-    onSuccess: (t) => { setText(""); qc.invalidateQueries({ queryKey: ["tasks"] }); qc.invalidateQueries({ queryKey: ["sessions", agent.id] }); onSubmitted(t); },
+    mutationFn: () => api.post(`/api/agents/${agent.id}/tasks`, {
+      instructions: text.trim() || "Please review the attached files.", priority,
+      session_id: sessionId && continuable ? sessionId : null, attachment_ids: files.ids,
+    }, { "Idempotency-Key": crypto.randomUUID() }),
+    onSuccess: (t) => { setText(""); files.clear(); qc.invalidateQueries({ queryKey: ["tasks"] }); qc.invalidateQueries({ queryKey: ["sessions", agent.id] }); onSubmitted(t); },
     onError: (e: any) => toast("error", e.message),
   });
+  const ready = (!!text.trim() || files.ids.length > 0) && !files.uploading && !files.hasErrors;
   if (!can("tasks:create")) return <div className="composer-wrap"><Alert kind="neutral">Your role can view this agent but not assign tasks.</Alert></div>;
   const reason = agent.status !== "active" ? `${agent.name} is ${agent.status}. Activate it to assign tasks.`
     : busy ? "This session has an active task. Wait for it to finish, or start a new session." : null;
   const p = agent.config.policy;
   return (
     <div className="composer-wrap">
-      <form className="composer" onSubmit={(e) => { e.preventDefault(); if (text.trim() && !reason) submit.mutate(); }}>
+      <form className={`composer ${dragging ? "dragging" : ""}`} onSubmit={(e) => { e.preventDefault(); if (ready && !reason) submit.mutate(); }}
+        onDragOver={(e) => { if (!reason && e.dataTransfer.types.includes("Files")) { e.preventDefault(); setDragging(true); } }}
+        onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragging(false); }}
+        onDrop={(e) => { e.preventDefault(); setDragging(false); if (!reason && e.dataTransfer.files.length) files.add(e.dataTransfer.files); }}>
+        <PendingAttachments items={files.items} onRemove={files.remove} />
         <label htmlFor="composer" className="sr-only">Task instructions for {agent.name}</label>
         <textarea id="composer" ref={textareaRef} value={text} disabled={!!reason}
-          placeholder={reason ?? (sessionId && continuable ? `Follow up with ${agent.name}…` : `Describe a task for ${agent.name}…`)}
+          placeholder={reason ?? (dragging ? "Drop files to attach" : sessionId && continuable ? `Follow up with ${agent.name}…` : `Describe a task for ${agent.name}…`)}
           onChange={(e) => setText(e.target.value)} rows={3}
-          onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && text.trim() && !reason) { e.preventDefault(); submit.mutate(); } }} />
+          onPaste={(e) => { const f = Array.from(e.clipboardData.files); if (f.length && !reason) { e.preventDefault(); files.add(f); } }}
+          onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && ready && !reason) { e.preventDefault(); submit.mutate(); } }} />
         <div className="composer-foot">
+          <AttachButton onFiles={files.add} disabled={!!reason || files.full} />
           <span className="tiny muted ellipsis grow">
             {sessionId && continuable ? "Continues this session" : "New session"} · approvals: {p.approval_mode} · timeout {Math.round(p.task_timeout_s / 60)} min
           </span>
@@ -441,7 +455,8 @@ function Composer({ agent, sessionId, continuable, busy, textareaRef, onSubmitte
             <option value={2}>Low priority</option><option value={5}>Normal priority</option><option value={8}>High priority</option><option value={10}>Urgent</option>
           </select>
           <span className="kbd hide-sm" aria-hidden>Ctrl ↵</span>
-          <button className="btn primary sm" type="submit" disabled={!text.trim() || !!reason || submit.isPending}><Send /> {submit.isPending ? "Submitting…" : "Run"}</button>
+          <button className="btn primary sm" type="submit" disabled={!ready || !!reason || submit.isPending}
+            title={files.uploading ? "Waiting for uploads to finish" : files.hasErrors ? "Remove the files that failed to upload" : undefined}><Send /> {submit.isPending ? "Submitting…" : "Run"}</button>
         </div>
       </form>
     </div>

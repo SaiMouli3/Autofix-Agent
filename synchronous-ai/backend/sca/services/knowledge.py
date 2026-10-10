@@ -29,7 +29,7 @@ from sca.services.providers import ProviderError, embed_texts
 
 log = logging.getLogger("sca.knowledge")
 
-SUPPORTED_EXTENSIONS = {".txt", ".md", ".markdown", ".csv", ".json", ".html", ".htm", ".pdf", ".docx", ".yaml", ".yml", ".log"}
+SUPPORTED_EXTENSIONS = {".txt", ".md", ".markdown", ".csv", ".json", ".html", ".htm", ".pdf", ".docx", ".xlsx", ".yaml", ".yml", ".log"}
 CHUNK_CHARS = 1400
 CHUNK_OVERLAP = 200
 
@@ -61,6 +61,23 @@ def extract_text(path: Path, filename: str) -> str:
             for row in table.rows:
                 parts.append(" | ".join(c.text.strip() for c in row.cells))
         return "\n".join(parts)
+    if ext == ".xlsx":
+        from openpyxl import load_workbook
+
+        wb = load_workbook(io.BytesIO(raw), read_only=True, data_only=True)
+        parts = []
+        for ws in wb.worksheets:
+            rows = []
+            for row in ws.iter_rows(values_only=True):
+                if any(c is not None and str(c).strip() for c in row):
+                    rows.append(" | ".join("" if c is None else str(c) for c in row))
+                if len(rows) >= 5000:
+                    rows.append("… (more rows not shown)")
+                    break
+            if rows:
+                parts.append(f"[sheet {ws.title}]\n" + "\n".join(rows))
+        wb.close()
+        return "\n\n".join(parts)
     text = raw.decode("utf-8", errors="replace")
     if ext in (".html", ".htm"):
         from bs4 import BeautifulSoup

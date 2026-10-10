@@ -61,6 +61,17 @@ UI are cosmetic — the backend enforces RBAC on every request.
 | Actual (invoiced) cost | Not available from providers' APIs | Costs labelled **estimate**, computed from published rates |
 | Integration "connected" | Requires a successful live test | A saved credential alone shows **Untested** |
 
+**Attachments.** The composer accepts documents (PDF, Word, Excel, CSV, text, Markdown, JSON, HTML,
+YAML, XML; up to `SCA_MAX_UPLOAD_BYTES`) and images (PNG, JPG, WebP, GIF; up to 10 MB) through the
+📎 button, drag and drop, or paste (screenshots). Files upload immediately (`POST /api/attachments`,
+type checked against the content) and are linked to the task on submit (`attachment_ids`, at most
+10). When the task starts, they are copied into the workspace under `attachments/`, document text is
+extracted (with a `.txt` copy) and included in the agent's first message as untrusted data (20,000
+characters per document, 60,000 in total; the rest is in the `.txt` file), and images are sent to
+vision-capable models (downscaled to at most 1568 px) or described as unavailable otherwise. Sent
+attachments appear under the message and download with the task's permissions; unsent uploads are
+visible only to their uploader and are purged after a day.
+
 **Deleting an agent** (agent menu → *Delete agent*, type the name to confirm) is permanent:
 `DELETE /api/agents/{id}` removes its versions, tasks, sessions, schedules and workspace files.
 The API refuses (409) while it has active tasks or pending approvals. Usage records and the

@@ -395,6 +395,18 @@ pre.code { background: var(--surface-2); border: 1px solid var(--border); border
 .composer textarea:focus { box-shadow: none; }
 .composer-foot { display: flex; align-items: center; gap: 8px; padding: 6px 8px 8px 12px; }
 .composer-foot select { height: 26px; width: auto; font-size: 12px; padding: 0 6px; }
+.composer.dragging { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring); background: var(--surface-2); }
+.att-list { list-style: none; margin: 0; padding: 8px 12px 0; display: flex; flex-wrap: wrap; gap: 8px; }
+.msg-user .att-list { padding: 8px 0 0; }
+.att-chip { display: flex; align-items: center; gap: 8px; max-width: 260px; padding: 5px 6px 5px 5px; border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--surface); color: inherit; text-decoration: none; }
+a.att-chip:hover { border-color: var(--border-strong); background: var(--surface-2); }
+.att-chip.error { border-color: var(--danger); }
+.att-chip.uploading { opacity: .8; }
+.att-thumb { width: 36px; height: 36px; object-fit: cover; border-radius: 4px; flex: none; }
+.att-icon { width: 36px; height: 36px; display: grid; place-items: center; border-radius: 4px; background: var(--surface-2); color: var(--ink-2); flex: none; }
+.att-meta { display: flex; flex-direction: column; min-width: 0; font-size: 12.5px; line-height: 1.3; }
+.att-image img { display: block; max-width: 220px; max-height: 160px; border-radius: var(--r-sm); border: 1px solid var(--border); object-fit: cover; }
+.spin { animation: spin 1s linear infinite; vertical-align: -2px; }
 .ctx { background: var(--surface); overflow: auto; min-height: 0; display: flex; flex-direction: column; }
 .ctx-off .ctx { display: none; }
 .ctx-section { padding: 14px 16px; border-bottom: 1px solid var(--border); }

@@ -18,6 +18,7 @@ from sca.models import (
     Agent,
     AgentVersion,
     ApprovalRequest,
+    Attachment,
     TASK_ACTIVE_STATES,
     Integration,
     KnowledgeSource,
@@ -262,8 +263,14 @@ def delete_agent(agent_id: str, p: Principal = Depends(require("agents:write")),
     audit.record(db, p.org_id, "agent.deleted", actor_id=p.user_id, target_type="agent", target_id=agent.id,
                  details={"name": agent.name, "versions": agent.current_version, "tasks": tasks,
                           "schedules": schedules, "delegation_updated": updated})
-    db.delete(agent)  # versions, sessions, tasks (with events, artifacts, approvals) and schedules cascade
+    from sca.services import attachments as att_svc
+
+    att_dirs = [att_svc.folder(a) for a in db.execute(select(Attachment).join(Task, Attachment.task_id == Task.id)
+                                                      .where(Task.agent_id == agent.id)).scalars()]
+    db.delete(agent)  # versions, sessions, tasks (with events, artifacts, approvals, attachments) and schedules cascade
     db.commit()
+    for d in att_dirs:
+        shutil.rmtree(d, ignore_errors=True)
     root = get_settings().workspaces_dir
     ws = (root / p.org_id / agent_id).resolve()
     if ws.is_relative_to(root) and ws != root:
