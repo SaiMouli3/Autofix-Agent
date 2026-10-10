@@ -357,3 +357,21 @@ def test_oauth_preflight_reports_vendor_errors_in_app(monkeypatch):
         raise httpx.ConnectError("unreachable")
 
     check(down)
+
+
+def test_agent_identity_replaces_runtime_default():
+    """The system prompt the runtime builds names the agent and Synchronous AI, not OpenHands."""
+    from openhands.sdk import LLM
+    from openhands.sdk import Agent as SdkAgent
+    from openhands.sdk.context import AgentContext
+
+    from sca.agent_config import compose_identity
+
+    cfg = AgentConfig.model_validate({"role": "software engineer", "model": {"provider_id": "p", "model": "m"}, "tools": []})
+    agent = SdkAgent(llm=LLM(model="openai/test-model", usage_id="t"), tools=[],
+                     system_prompt_kwargs={"soul_content": compose_identity("Software Engineering Agent", "Acme", cfg)},
+                     agent_context=AgentContext(system_message_suffix="x", load_user_skills=False, load_public_skills=False))
+    prompt = agent.static_system_message
+    assert "You are Software Engineering Agent, an AI agent on Synchronous AI" in prompt
+    assert "You are OpenHands agent" not in prompt
+    assert "Markdown" in prompt

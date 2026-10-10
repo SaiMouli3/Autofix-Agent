@@ -55,6 +55,7 @@ SOFTWARE.
 | React Router | MIT |
 | TanStack Query | MIT |
 | lucide-react | ISC |
+| react-markdown, remark-gfm | MIT |
 | Inter, JetBrains Mono (self-hosted via @fontsource-variable) | SIL Open Font License 1.1 |
 | Simple Icons 16.32.0 (connector logos, bundled) | CC0-1.0 |
 | Vite, TypeScript, Playwright | MIT / Apache-2.0 |

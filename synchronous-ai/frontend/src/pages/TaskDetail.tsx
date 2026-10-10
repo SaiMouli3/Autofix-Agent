@@ -3,6 +3,7 @@ import { Ban, GitBranch, RotateCcw } from "lucide-react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { BotMark } from "../components/BotMark";
 import { FilesBrowser } from "../components/FilesBrowser";
+import { Markdown } from "../components/Markdown";
 import { Shell } from "../components/Shell";
 import { Timeline } from "../components/Timeline";
 import { Alert, Dots, Empty, ErrorState, KV, Skeleton, Status, Tabs, useConfirm, useToast } from "../components/ui";
@@ -88,7 +89,7 @@ export default function TaskDetail() {
             {tab === "result" && (
               <div className="panel-body stack">
                 <div><div className="section-title">Instructions</div><div className="prose">{t.instructions}</div></div>
-                <div><div className="section-title">Result</div>{t.result_summary ? <div className="prose">{t.result_summary}</div> : <p className="muted small">{active ? "The agent is still working." : "No written result."}</p>}</div>
+                <div><div className="section-title">Result</div>{t.result_summary ? <Markdown>{t.result_summary}</Markdown> : <p className="muted small">{active ? "The agent is still working." : "No written result."}</p>}</div>
               </div>
             )}
             {tab === "artifacts" && (t.session_id ? <FilesBrowser sessionId={t.session_id} highlight={(artifacts.data ?? []).map((a: any) => a.path)} initial={sp.get("file")} /> : <Empty title="No workspace yet">The workspace is created when execution starts.</Empty>)}

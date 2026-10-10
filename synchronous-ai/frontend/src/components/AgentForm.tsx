@@ -143,7 +143,7 @@ export function InstructionsSection({ value, onChange, errors = {} }: { value: C
       <label className="field">Instructions
         <textarea rows={8} value={value.instructions} maxLength={20000} onChange={(e) => set({ instructions: e.target.value })} style={{ fontSize: 13.5 }}
           placeholder="How the agent should approach its work: process, tone, sources to prefer, what good looks like." />
-        <span className="help">Appended to the OpenHands agent system prompt together with the platform's security policy.</span>
+        <span className="help">Added to the agent's instructions together with the platform's security policy.</span>
       </label>
       <div className="form-grid">
         <label className="field">Expected outputs<textarea rows={3} value={value.expected_outputs} onChange={(e) => set({ expected_outputs: e.target.value })} placeholder="e.g. A Markdown report saved as report.md" /></label>
@@ -292,7 +292,7 @@ export function ToolsSection({ value, onChange, errors = {} }: { value: Config; 
                     <div className="row between wrap"><b className="small">{t.label}</b>
                       <span className="row" style={{ gap: 4 }}>
                         <Tag tone={acc.tone}>{acc.label}</Tag>
-                        <Tag tone="outline">{t.kind === "runtime" ? "OpenHands runtime" : "Platform, server-checked"}</Tag>
+                        <Tag tone="outline">{t.kind === "runtime" ? "Workspace tool" : "Platform, server-checked"}</Tag>
                       </span>
                     </div>
                     <div className="small muted">{t.description}</div>

@@ -22,6 +22,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { BotMark } from "../components/BotMark";
+import { Markdown } from "../components/Markdown";
 import { Shell, useLive } from "../components/Shell";
 import { Timeline } from "../components/Timeline";
 import { Alert, Dots, Empty, ErrorState, KV, Menu, Skeleton, Status, Tabs, Tag, useConfirm, useToast } from "../components/ui";
@@ -325,7 +326,7 @@ function TurnBody({ t, onSelect }: { t: any; onSelect: () => void }) {
       )}
       {pendingApproval && <InlineApproval approval={pendingApproval} taskId={t.id} canDecide={can("approvals:decide")} />}
       {steps.length > 0 && <ExecSummary steps={steps} live={t.status === "running"} onSelect={onSelect} />}
-      {t.status === "completed" && (t.result_summary ? <div className="prose mt8">{t.result_summary}</div> : <p className="small muted">Completed without a written summary.</p>)}
+      {t.status === "completed" && (t.result_summary ? <div className="mt8"><Markdown>{t.result_summary}</Markdown></div> : <p className="small muted">Completed without a written summary.</p>)}
       {failure && (
         <div className="mt8">
           <Alert kind={t.status === "cancelled" ? "neutral" : "error"} actions={can("tasks:create") && <button className="btn xs" onClick={() => retry.mutate()} disabled={retry.isPending}><RotateCcw /> Retry</button>}>

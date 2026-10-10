@@ -10,27 +10,27 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 RUNTIME_TOOLS = {
     "terminal": {
         "label": "Terminal", "group": "Execution", "risk": "high",
-        "description": "Run shell commands in the agent's sandboxed workspace (OpenHands TerminalTool).",
+        "description": "Run shell commands in the agent's sandboxed workspace.",
     },
     "file_editor": {
         "label": "File operations", "group": "Files", "risk": "medium",
-        "description": "View, create and edit files in the workspace (OpenHands FileEditorTool).",
+        "description": "View, create and edit files in the workspace.",
     },
     "task_tracker": {
         "label": "Task planner", "group": "Planning", "risk": "low",
-        "description": "Maintain a structured plan / checklist while working (OpenHands TaskTrackerTool).",
+        "description": "Maintain a structured plan / checklist while working.",
     },
     "grep": {
         "label": "Content search", "group": "Files", "risk": "low",
-        "description": "Regex search over workspace files (OpenHands GrepTool).",
+        "description": "Regex search over workspace files.",
     },
     "glob": {
         "label": "File finder", "group": "Files", "risk": "low",
-        "description": "Find workspace files by glob pattern (OpenHands GlobTool).",
+        "description": "Find workspace files by glob pattern.",
     },
     "browser": {
         "label": "Browser automation", "group": "Web", "risk": "high",
-        "description": "Navigate and interact with web pages (OpenHands BrowserToolSet). Requires Chromium.",
+        "description": "Navigate and interact with web pages. Requires Chromium.",
     },
 }
 
@@ -116,6 +116,23 @@ class AgentConfig(BaseModel):
     @classmethod
     def _strip_items(cls, v: list[str]) -> list[str]:
         return [s.strip()[:1000] for s in v if s and s.strip()]
+
+
+PLATFORM_NAME = "Synchronous AI"
+
+
+def compose_identity(agent_name: str, org_name: str, cfg: AgentConfig) -> str:
+    """The agent's identity, replacing the runtime's default one ("You are OpenHands agent, ...")."""
+    role = f" Your role: {cfg.role}." if cfg.role else ""
+    return (
+        f"You are {agent_name}, an AI agent on {PLATFORM_NAME} (by Synchronous Consulting Inc), working for "
+        f"{org_name}.{role} You can use the tools you have been given to complete tasks.\n"
+        f"When someone asks who you are, introduce yourself as {agent_name} from {PLATFORM_NAME}; do not call "
+        f"yourself OpenHands or by any other product name. If someone asks specifically which software or model "
+        f"you run on, answer honestly.\n"
+        "Write replies in Markdown: short paragraphs, bullet lists for options, headings only for long answers, "
+        "and fenced code blocks for code. Keep greetings and simple answers brief, without headings."
+    )
 
 
 def compose_system_suffix(cfg: AgentConfig, agent_name: str, org_name: str) -> str:

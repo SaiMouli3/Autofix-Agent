@@ -33,7 +33,7 @@ from typing import Any
 from sqlalchemy import func, select
 
 from sca import events as bus
-from sca.agent_config import AgentConfig, compose_system_suffix
+from sca.agent_config import AgentConfig, compose_identity, compose_system_suffix
 from sca.config import get_settings
 from sca.db import session_scope
 from sca.models import (
@@ -370,6 +370,8 @@ def _build_conversation(p: Prepared, callback):
         tools=_runtime_tools(p.cfg),
         mcp_config=mcp_config,
         filter_tools_regex=filter_regex,
+        # Our identity replaces the runtime's default "You are OpenHands agent" line (SDK soul_content).
+        system_prompt_kwargs={"soul_content": compose_identity(p.agent_name, p.org_name, p.cfg)},
         agent_context=AgentContext(system_message_suffix=suffix, load_user_skills=False, load_public_skills=False),
         condenser=LLMSummarizingCondenser(llm=p.llm.model_copy(update={"usage_id": "condenser"}),
                                           max_size=120, keep_first=4),
