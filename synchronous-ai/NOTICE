@@ -1,0 +1,12 @@
+Synchronous Consulting AI
+Copyright (c) 2026 the Synchronous Consulting AI authors.
+
+This product includes software developed by the OpenHands contributors
+(OpenHands Software Agent SDK: openhands-sdk, openhands-tools, openhands-workspace,
+and the OpenHands agent-server container image), licensed under the MIT License.
+https://github.com/OpenHands/software-agent-sdk — see THIRD_PARTY_LICENSES.md.
+
+Synchronous Consulting AI is an independent product. It is not affiliated with,
+sponsored by or endorsed by OpenHands / All Hands AI, OpenAI, Anthropic, xAI,
+Experiential Labs or any model provider whose API it can be configured to use.
+Provider and model names are used only to identify compatible services.

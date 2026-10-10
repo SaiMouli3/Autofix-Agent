@@ -1,0 +1,76 @@
+name: synchronous-ai
+
+on:
+  push:
+    paths: ["synchronous-ai/**", ".github/workflows/synchronous-ai.yml"]
+  pull_request:
+    paths: ["synchronous-ai/**", ".github/workflows/synchronous-ai.yml"]
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: synchronous-ai/backend } }
+    env:
+      HAS_LIVE_KEY: ${{ secrets.EXP_LABS_API_KEY != '' }}
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env: { POSTGRES_USER: sca, POSTGRES_PASSWORD: ci-only, POSTGRES_DB: sca }
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U sca" --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: sudo apt-get update && sudo apt-get install -y tmux
+      - run: pip install ".[postgres,dev]"
+      - name: Lint
+        run: ruff check sca tests --select E9,F63,F7,F82
+      - name: Unit + integration tests (SQLite)
+        run: pytest -m "not live and not docker" -q
+      - name: Unit + integration tests (PostgreSQL)
+        env: { SCA_DATABASE_URL: "postgresql+psycopg://sca:ci-only@127.0.0.1:5432/sca" }
+        run: pytest -m "not live and not docker" -q
+      - name: Live tests against the real provider (only when the secret is configured)
+        if: env.HAS_LIVE_KEY == 'true'
+        env: { EXP_LABS_API_KEY: "${{ secrets.EXP_LABS_API_KEY }}" }
+        run: pytest -m live -q
+      - name: Dependency vulnerability audit
+        run: pip-audit --progress-spinner off || (echo "::warning::pip-audit reported findings" && exit 0)
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: synchronous-ai/frontend } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "22", cache: npm, cache-dependency-path: synchronous-ai/frontend/package-lock.json }
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run build
+      - name: No secrets in the bundle
+        run: "! grep -rEl '(xpl|sk)[-_][A-Za-z0-9]{24,}' dist/"
+      - name: npm audit (production dependencies)
+        run: npm audit --omit=dev --audit-level=high
+      - name: Mocked UI-state tests (no backend; fixtures only)
+        run: |
+          npx playwright install --with-deps chromium
+          npx playwright test ui-states.mocked
+
+  image:
+    runs-on: ubuntu-latest
+    needs: [backend, frontend]
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t synchronous-ai:ci synchronous-ai
+      - name: Container vulnerability scan
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25  # v0.36.0
+        with:
+          image-ref: synchronous-ai:ci
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "0"
