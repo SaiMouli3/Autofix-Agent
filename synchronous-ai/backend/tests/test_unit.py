@@ -375,3 +375,17 @@ def test_agent_identity_replaces_runtime_default():
     assert "You are Software Engineering Agent, an AI agent on Synchronous AI" in prompt
     assert "You are OpenHands agent" not in prompt
     assert "Markdown" in prompt
+
+
+def test_replies_never_show_server_workspace_paths():
+    from sca.config import get_settings
+    from sca.orchestrator.executor import _workspace_relative
+
+    root = get_settings().workspaces_dir
+    ids = "3a6e71913ad54efe8601a18b87493f80/6900639d39c544719fe2bbba1e17e68f/b010a0a0ebb04705ab022e6160ece177"
+    reply = f"Saved to `{root}/{ids}/project/add_numbers.py`.\n```bash\ncd {root}/{ids}/project/\ncat add_numbers.py\n```"
+    out = _workspace_relative(reply)
+    assert str(root) not in out and "`add_numbers.py`" in out
+    assert _workspace_relative("Wrote /workspace/project/report.md") == "Wrote report.md"
+    assert _workspace_relative("See https://example.com/workspace/project/x") == "See https://example.com/workspace/project/x"
+    assert _workspace_relative(f"data lives in {root}") == "data lives in the workspace"

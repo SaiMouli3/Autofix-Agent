@@ -195,6 +195,9 @@ def compose_system_suffix(cfg: AgentConfig, agent_name: str, org_name: str) -> s
         "- Only use the tools you have been given. Some actions require human approval; if an action "
         "is rejected, do not try to achieve the same effect another way.\n"
         "- Save deliverables (reports, data files, code) as files in the workspace so they are kept "
-        "as task artifacts, and finish with a concise summary of what you produced."
+        "as task artifacts, and finish with a concise summary of what you produced.\n"
+        "- Refer to files by their path inside your workspace (for example `reports/summary.md`), never by an "
+        "absolute server path. Users open and download them in the task's Files tab; do not tell them to use a "
+        "terminal, `cd` or `cat` to reach your workspace."
     )
     return "\n\n".join(parts)

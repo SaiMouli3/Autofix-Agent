@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import re
 import mimetypes
 import os
 import secrets as pysecrets
@@ -550,6 +551,17 @@ def _revoke_token(task_id: str) -> None:
             t.revoked = True
 
 
+def _workspace_relative(text: str) -> str:
+    """Replace server paths to a session's project folder with workspace-relative ones, so replies never
+    show internal paths (host data dir or the sandbox mount) that users cannot open."""
+    if not text:
+        return text
+    root = re.escape(str(get_settings().workspaces_dir))
+    text = re.sub(root + r"/[0-9a-f]{32}/[0-9a-f]{32}/[0-9a-f]{32}/project/?", "", text)
+    text = re.sub(r"(?<![\w.])/workspace/project/?", "", text)
+    return re.sub(root + r"[^\s`'\")]*", "the workspace", text)
+
+
 def _finish(task_id: str, status: str, *, summary: str = "", error: dict | None = None,
             requeue_in: float | None = None) -> None:
     with session_scope() as db:
@@ -567,7 +579,7 @@ def _finish(task_id: str, status: str, *, summary: str = "", error: dict | None 
         else:
             task.status = status
             task.finished_at = utcnow()
-            task.result_summary = redact_text(summary)[:50_000]
+            task.result_summary = _workspace_relative(redact_text(summary))[:50_000]
             task.error = error
             task.lease_owner = None
             task.lease_expires_at = None

@@ -79,6 +79,29 @@ location /           { proxy_pass http://app:8000; client_max_body_size 30m; }
 Rate limiting inside the app is per process; for multi-replica deployments enforce limits at the
 proxy/gateway as well. Restrict `/metrics` to your monitoring network.
 
+## Where files are stored in the cloud
+
+Agent output files (workspaces), uploaded knowledge documents and the development encryption key
+live under `SCA_DATA_DIR` (`/data` in the image); everything else is in PostgreSQL. Users never
+need server paths: each task's **Files** tab lists its workspace files with **Download**, served by
+the API with the same permissions as the task.
+
+`/data` must be a **persistent volume**, or files disappear when the container is replaced:
+
+| Platform | `/data` | Database |
+|---|---|---|
+| Single VM (Compose) | the `appdata` volume, on the VM disk (back it up / snapshot it) | the `pgdata` volume, or a managed PostgreSQL |
+| AWS | EBS volume (one instance) or EFS (several instances / ECS / EKS) | Amazon RDS for PostgreSQL |
+| Azure | Managed Disk (one instance) or Azure Files (several) | Azure Database for PostgreSQL |
+| Google Cloud | Persistent Disk (one instance) or Filestore (several) | Cloud SQL for PostgreSQL |
+| Kubernetes | a PersistentVolumeClaim (ReadWriteMany when replicas > 1) | managed PostgreSQL |
+
+With more than one API replica, `/data` must be **shared** (EFS / Azure Files / Filestore / RWX
+PVC), because a task's files are written by whichever replica ran it and read by whichever serves
+the download. Object storage (S3, Blob, GCS) is not used directly; mount it only through a
+filesystem layer if you must. Container platforms without volumes (for example plain serverless
+containers) are not suitable.
+
 ## Scaling out
 
 Several API replicas can share one PostgreSQL database: task claims are atomic and leases recover
