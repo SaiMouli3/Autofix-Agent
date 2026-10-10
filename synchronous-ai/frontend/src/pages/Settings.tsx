@@ -5,13 +5,14 @@ import { useSearchParams } from "react-router-dom";
 import { BRAND } from "../brand";
 import { Shell } from "../components/Shell";
 import { SignInAppsSection } from "../components/SignInApps";
+import { WebSearchSettings } from "../components/WebSearch";
 import { Alert, Dialog, Empty, ErrorState, InlineError, KV, Pager, SkeletonRows, Status, Tabs, Tag, useConfirm, useToast } from "../components/ui";
 import { api, qs } from "../lib/api";
 import { fullDateTime, timeAgo } from "../lib/format";
 import { useSession } from "../lib/session";
 import { providerState } from "../lib/status";
 
-type Tab = "providers" | "signin" | "organization" | "team" | "audit" | "account";
+type Tab = "providers" | "signin" | "web" | "organization" | "team" | "audit" | "account";
 
 export default function SettingsPage() {
   const { can } = useSession();
@@ -20,6 +21,7 @@ export default function SettingsPage() {
   const tabs: { key: Tab; label: string }[] = [
     { key: "providers", label: "Model providers" },
     { key: "signin", label: "Sign-in apps" },
+    { key: "web", label: "Web search" },
     { key: "organization", label: "Organization" },
     { key: "team", label: "Team & roles" },
     ...(can("audit:read") ? [{ key: "audit" as Tab, label: "Audit log" }] : []),
@@ -32,6 +34,7 @@ export default function SettingsPage() {
       <div className="mt16">
         {tab === "providers" && <Providers />}
         {tab === "signin" && <SignInAppsSection />}
+        {tab === "web" && <WebSearchSettings />}
         {tab === "organization" && <Organization />}
         {tab === "team" && <Team />}
         {tab === "audit" && can("audit:read") && <Audit />}

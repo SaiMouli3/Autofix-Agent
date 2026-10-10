@@ -12,7 +12,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Literal
 
-from pydantic import Field, field_validator
+from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
@@ -37,6 +37,9 @@ class Settings(BaseSettings):
     # Deployment-wide OAuth sign-in apps, JSON: {"github": {"client_id": "...", "client_secret": "..."}}.
     # An organization's own app (Settings → Sign-in apps) takes precedence.
     oauth_clients: dict[str, dict[str, str]] = Field(default_factory=dict)
+
+    # Web search for agents (Tavily). An organization's own key (Settings → Web search) takes precedence.
+    tavily_api_key: str = Field(default="", validation_alias=AliasChoices("SCA_TAVILY_API_KEY", "TAVILY_API_KEY"))
 
     # Sessions
     session_ttl_hours: int = 12

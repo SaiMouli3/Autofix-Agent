@@ -27,7 +27,7 @@ from sca.models import (
     Team,
     User,
 )
-from sca.services import audit
+from sca.services import audit, websearch
 from sca.templates import TEMPLATES
 
 router = APIRouter(prefix="/api", tags=["agents"])
@@ -76,6 +76,8 @@ def _validate_config(db: Session, p: Principal, raw: dict[str, Any], agent_id: s
             raise HTTPException(422, f"fallback model '{cfg.model.fallback_model}' is not offered by {prov.name}")
     if "browser" in cfg.tools and not get_settings().enable_browser_tool:
         raise HTTPException(422, "the browser tool is not enabled on this deployment (SCA_ENABLE_BROWSER_TOOL)")
+    if "web_search" in cfg.tools and not websearch.api_key(db, p.org_id)[0]:
+        raise HTTPException(422, "Web search is not set up yet: an administrator adds the Tavily API key in Settings → Web search.")
     for iid in cfg.integrations:
         integ = db.get(Integration, iid)
         if integ is None or integ.org_id != p.org_id:
@@ -279,13 +281,16 @@ def versions(agent_id: str, p: Principal = Depends(require("agents:read")), db: 
 
 
 @router.get("/catalog/tools")
-def tool_catalog(p: Principal = Depends(require("agents:read"))):
+def tool_catalog(p: Principal = Depends(require("agents:read")), db: Session = Depends(get_db)):
     s = get_settings()
+    web_ready = bool(websearch.api_key(db, p.org_id)[0])
     out = []
     for key, meta in ALL_TOOLS.items():
         available, reason = True, ""
         if key == "browser" and not s.enable_browser_tool:
             available, reason = False, "disabled on this deployment"
+        if key == "web_search" and not web_ready:
+            available, reason = False, "not set up: add the Tavily API key in Settings → Web search"
         out.append({"key": key, **meta, "kind": "runtime" if key in RUNTIME_TOOLS else "platform",
                     "available": available, "unavailable_reason": reason})
     return {"tools": out, "platform_tools": list(PLATFORM_TOOLS)}

@@ -130,9 +130,10 @@ def create_app() -> FastAPI:
         providers,
         schedules,
         tasks,
+        websearch,
     )
 
-    for r in (auth, agents, tasks, approvals, providers, integrations, knowledge, schedules, admin, dashboard):
+    for r in (auth, agents, tasks, approvals, providers, integrations, knowledge, schedules, admin, dashboard, websearch):
         app.include_router(r.router)
     app.include_router(integrations.oauth_router)
 

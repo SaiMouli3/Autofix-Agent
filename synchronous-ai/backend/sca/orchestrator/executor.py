@@ -33,7 +33,7 @@ from typing import Any
 from sqlalchemy import func, select
 
 from sca import events as bus
-from sca.agent_config import AgentConfig, compose_identity, compose_system_suffix
+from sca.agent_config import WEB_GUIDANCE, AgentConfig, compose_identity, compose_system_suffix
 from sca.config import get_settings
 from sca.db import session_scope
 from sca.models import (
@@ -280,6 +280,13 @@ def _prepare(task_id: str) -> Prepared:
                         log.warning("skipping MCP integration %s: %s", integ.name, exc)
         if http_integrations:
             platform_tools += ["list_integrations", "call_integration"]
+        if "web_search" in cfg.tools:
+            from sca.services import websearch
+
+            if websearch.api_key(db, task.org_id)[0]:
+                platform_tools += ["web_search", "web_read"]
+            else:
+                log.warning("web search enabled for agent %s but no Tavily key is configured", agent.id)
         if ("delegation" in cfg.tools and cfg.policy.delegation.allowed_agent_ids
                 and task.delegation_depth < cfg.policy.delegation.max_depth):
             platform_tools.append("delegate_task")
@@ -356,13 +363,16 @@ def _build_conversation(p: Prepared, callback):
         )
     filter_regex = None
     if p.platform_token:
-        hidden = {"knowledge_search", "list_integrations", "call_integration", "delegate_task"} - set(p.platform_tools)
+        hidden = {"knowledge_search", "list_integrations", "call_integration", "delegate_task",
+                  "web_search", "web_read"} - set(p.platform_tools)
         if hidden:
             filter_regex = "^(?!(?:.*_)?(?:" + "|".join(sorted(hidden)) + ")$).*$"
 
     suffix = compose_system_suffix(p.cfg, p.agent_name, p.org_name)
     if "knowledge_search" in p.platform_tools:
         suffix += "\n\nUse the knowledge_search tool to consult approved company knowledge and cite the returned source references."
+    if "web_search" in p.platform_tools:
+        suffix += "\n\n" + WEB_GUIDANCE
     if "delegate_task" in p.platform_tools:
         suffix += "\n\nYou may delegate well-scoped sub-tasks to permitted agents with delegate_task."
     agent = SdkAgent(

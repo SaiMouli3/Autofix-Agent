@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Check, Lock } from "lucide-react";
 import { useState } from "react";
 import { Link } from "react-router-dom";
+import { WebSearchPermission } from "./WebSearch";
 import { api } from "../lib/api";
 import { usd } from "../lib/format";
 import { providerState } from "../lib/status";
@@ -247,6 +248,7 @@ const ACCESS: Record<string, { label: string; tone: string }> = {
   grep: { label: "Read-only", tone: "" },
   glob: { label: "Read-only", tone: "" },
   knowledge_search: { label: "Read-only", tone: "" },
+  web_search: { label: "Queries sent to Tavily", tone: "warning" },
 };
 export const DANGEROUS_TOOLS = ["terminal", "browser"];
 
@@ -255,7 +257,8 @@ export function ToolsSection({ value, onChange, errors = {} }: { value: Config; 
   const [q, setQ] = useState("");
   const catalog = useQuery({ queryKey: ["tool-catalog"], queryFn: ({ signal }) => api.get("/api/catalog/tools", signal) });
   const integrations = useQuery({ queryKey: ["integrations"], queryFn: ({ signal }) => api.get("/api/integrations", signal) });
-  const tools = (catalog.data?.tools ?? []).filter((t: any) => !q || `${t.label} ${t.description} ${t.group}`.toLowerCase().includes(q.toLowerCase()));
+  // Web search is asked as its own explicit question below, not as a checkbox in the list.
+  const tools = (catalog.data?.tools ?? []).filter((t: any) => t.key !== "web_search" && (!q || `${t.label} ${t.description} ${t.group}`.toLowerCase().includes(q.toLowerCase())));
   const groups = Array.from(new Set(tools.map((t: any) => t.group))) as string[];
   const toggle = async (t: any) => {
     const on = value.tools.includes(t.key);
@@ -275,6 +278,8 @@ export function ToolsSection({ value, onChange, errors = {} }: { value: Config; 
         <span className="tiny muted">{value.tools.length} selected</span>
       </div>
       {errors.tools && <Alert kind="warn">{errors.tools}</Alert>}
+      <WebSearchPermission enabled={value.tools.includes("web_search")}
+        onChange={(on) => onChange({ ...value, tools: on ? Array.from(new Set([...value.tools, "web_search"])) : value.tools.filter((x) => x !== "web_search") })} />
       {groups.map((g) => (
         <div key={g}>
           <div className="section-title">{g}</div>
@@ -376,7 +381,7 @@ export function PermissionsSection({ value, onChange, agentId }: { value: Config
   const setP = (patch: Partial<Config["policy"]>) => onChange({ ...value, policy: { ...p, ...patch } });
   const d = p.delegation;
   const setD = (patch: Partial<Config["policy"]["delegation"]>) => setP({ delegation: { ...d, ...patch } });
-  const risky = value.tools.filter((t) => ["terminal", "browser", "file_editor", "integrations", "delegation"].includes(t));
+  const risky = value.tools.filter((t) => ["terminal", "browser", "file_editor", "integrations", "delegation", "web_search"].includes(t));
   const setApproval = async (mode: Config["policy"]["approval_mode"]) => {
     if (mode === "never" && value.tools.some((t) => DANGEROUS_TOOLS.includes(t))) {
       const ok = await confirm({ title: "Run without approvals?", confirmLabel: "Remove approvals", danger: true,

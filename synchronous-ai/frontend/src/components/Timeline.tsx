@@ -1,5 +1,5 @@
 /** Execution timeline: persisted, redacted runtime events in order. Never shows model reasoning. */
-import { Ban, BookOpen, Check, ChevronDown, ChevronRight, CircleDot, FileOutput, GitBranch, MessageSquare, Pause, Plug, Wrench, X } from "lucide-react";
+import { Ban, BookOpen, Check, Globe, ChevronDown, ChevronRight, CircleDot, FileOutput, GitBranch, MessageSquare, Pause, Plug, Wrench, X } from "lucide-react";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { clock, fullDateTime } from "../lib/format";
@@ -23,6 +23,7 @@ function describe(e: ActivityEvent): { mark: string; icon: any; label: string } 
     case "approval": return { mark: "wait", icon: Pause, label: "Approval" };
     case "message": return { mark: "out", icon: MessageSquare, label: "Response" };
     case "knowledge": return { mark: "tool", icon: BookOpen, label: "Knowledge" };
+    case "web": return { mark: "tool", icon: Globe, label: "Web" };
     case "delegation": return { mark: "tool", icon: GitBranch, label: "Delegation" };
     case "integration": return { mark: "tool", icon: Plug, label: "Integration" };
     case "artifact": return { mark: "out", icon: FileOutput, label: "Files" };
@@ -38,6 +39,7 @@ function detail(e: ActivityEvent) {
   if ((e.type === "tool_error" || e.type === "error") && (d.error || d.detail)) return <pre className="code">{d.error ?? d.detail}</pre>;
   if (e.type === "message" && d.text) return <div className="prose small">{d.text}</div>;
   if (e.type === "approval" && (d.actions || d.details)) return <pre className="code">{JSON.stringify(d.actions ?? d.details, null, 2)}</pre>;
+  if (e.type === "web" && d.sources?.length) return <ul className="small" style={{ margin: 0, paddingLeft: 18 }}>{d.sources.map((s: any, i: number) => <li key={i}><a href={s.url} target="_blank" rel="noreferrer noopener" style={{ color: "var(--accent)" }}>{s.title || s.url}</a></li>)}</ul>;
   if (e.type === "knowledge" && d.sources?.length) return <pre className="code">{d.sources.map((s: any) => `${s.source} / ${s.document}   score ${s.score}`).join("\n")}</pre>;
   if (e.type === "artifact" && d.files) return <pre className="code">{d.files.join("\n")}</pre>;
   if (e.type === "status" && d.error) return <pre className="code">{d.error.code}: {d.error.message}</pre>;

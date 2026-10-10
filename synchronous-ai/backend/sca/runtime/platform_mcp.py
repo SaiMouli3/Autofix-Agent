@@ -35,14 +35,15 @@ from sca.models import (
 )
 from sca.security.crypto import sha256_hex
 from sca.security.redaction import redact
-from sca.services import audit, knowledge
+from sca.security.ratelimit import limiter
+from sca.services import audit, knowledge, websearch
 from sca.services.integrations import HttpConfig, IntegrationError, call_operation
 
 log = logging.getLogger("sca.platform_mcp")
 
 mcp = FastMCP(
     "synchronous-platform",
-    instructions="Governed company capabilities: knowledge search, approved API integrations and delegation.",
+    instructions="Governed company capabilities: knowledge search, live web search, approved API integrations and delegation.",
 )
 
 
@@ -106,6 +107,75 @@ async def knowledge_search(query: str, top_k: int = 5) -> str:
             return "No matching passages in your assigned knowledge sources."
         return _untrusted([{"reference": f"{h['source']} / {h['document']} #chunk-{h['ordinal']}",
                             "chunk_id": h["chunk_id"], "score": h["score"], "text": h["text"]} for h in hits])
+
+    return await _guard(work)
+
+
+# --------------------------------------------------------------------------- web
+
+WEB_CALLS_PER_TASK = 40  # per hour, per task: generous for research, bounded against runaway loops
+
+
+def _web_ctx(auth: str) -> Ctx:
+    ctx = _context(auth)
+    if "web_search" not in ctx.cfg.tools:
+        raise Denied("web search is not enabled for this agent")
+    if not limiter.allow(f"web:{ctx.task_id}", WEB_CALLS_PER_TASK, window_s=3600):
+        raise Denied(f"web search limit reached for this task ({WEB_CALLS_PER_TASK} calls)")
+    return ctx
+
+
+@mcp.tool
+async def web_search(query: str, max_results: int = 5, topic: str = "general", time_range: str = "",
+                     include_domains: list[str] | None = None, exclude_domains: list[str] | None = None,
+                     depth: str = "basic") -> str:
+    """Search the live web for current or public information. Use it for news, prices, releases and
+    versions, public documentation, companies and people, or facts you are unsure of - not for this
+    project's own files or the company's private documents. Returns titles, URLs, dates and content
+    snippets; cite the URLs you rely on. topic: general | news | finance. time_range: day | week |
+    month | year (optional). depth: basic | advanced (slower, more thorough). Never include secrets
+    or confidential details in the query."""
+
+    def work(auth: str) -> str:
+        ctx = _web_ctx(auth)
+        with session_scope() as db:
+            try:
+                out = websearch.search(db, ctx.org_id, query, max_results=max_results, topic=topic,
+                                       time_range=time_range or None, include_domains=include_domains,
+                                       exclude_domains=exclude_domains, depth=depth)
+            except websearch.WebSearchError as exc:
+                audit.record(db, ctx.org_id, "web.search_failed", actor_type="agent", actor_id=ctx.agent_id,
+                             target_type="task", target_id=ctx.task_id, details={"query": query[:300], "code": exc.code})
+                return f"Web search failed: {exc.message}"
+            audit.record(db, ctx.org_id, "web.search", actor_type="agent", actor_id=ctx.agent_id, target_type="task",
+                         target_id=ctx.task_id, details={"query": query[:300], "results": len(out["results"])})
+        bus.emit(ctx.org_id, ctx.task_id, ctx.agent_id, "web", f"Web search: {query[:120]} ({len(out['results'])} results)",
+                 {"query": query, "sources": [{"title": r["title"], "url": r["url"]} for r in out["results"]]})
+        if not out["results"]:
+            return "No web results. Try different keywords, a broader time range, or another topic."
+        return _untrusted(out)
+
+    return await _guard(work)
+
+
+@mcp.tool
+async def web_read(urls: list[str]) -> str:
+    """Read the main text of up to five public web pages (for example the best links from web_search,
+    or documentation URLs the user gave you). Long pages are truncated."""
+
+    def work(auth: str) -> str:
+        ctx = _web_ctx(auth)
+        with session_scope() as db:
+            try:
+                out = websearch.extract(db, ctx.org_id, urls)
+            except websearch.WebSearchError as exc:
+                return f"Reading the page failed: {exc.message}"
+            audit.record(db, ctx.org_id, "web.read", actor_type="agent", actor_id=ctx.agent_id, target_type="task",
+                         target_id=ctx.task_id, details={"urls": [u[:300] for u in (urls or [])[:5]],
+                                                         "read": len(out["pages"]), "failed": len(out["failed"])})
+        bus.emit(ctx.org_id, ctx.task_id, ctx.agent_id, "web", f"Read {len(out['pages'])} web page(s)",
+                 {"sources": [{"title": "", "url": pg["url"]} for pg in out["pages"]], "failed": out["failed"]})
+        return _untrusted(out)
 
     return await _guard(work)
 
