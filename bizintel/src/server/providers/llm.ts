@@ -1,4 +1,5 @@
 import { config, llmConfigured } from "../config";
+import { activeModel } from "../repo/workspace";
 import { ProviderError, providerJson } from "./http";
 
 export { llmConfigured };
@@ -37,7 +38,7 @@ async function llmJsonOnce<T>(system: string, user: string, opts: { signal?: Abo
         method: "POST",
         headers: { Authorization: `Bearer ${config.llm.apiKey}`, "Content-Type": "application/json" },
         body: JSON.stringify({
-          model: config.llm.model,
+          model: activeModel(),
           ...optional,
           messages: [
             { role: "system", content: system },
@@ -78,4 +79,58 @@ export function parseJsonObject<T>(content: string): T {
   }
 }
 
-export const llmModelName = () => (llmConfigured() ? config.llm.model : null);
+export const llmModelName = () => (llmConfigured() ? activeModel() : null);
+
+export interface LlmModel {
+  id: string;
+  /** USD per million tokens; null when the gateway publishes no price. */
+  inputUsdPerM: number | null;
+  outputUsdPerM: number | null;
+  contextTokens: number | null;
+}
+
+interface GatewayModel {
+  id: string;
+  context_window_tokens?: number | null;
+  supports_embeddings?: boolean | null;
+  supports_image_generation?: boolean | null;
+  pricing?: { input_nano_usd_per_million_tokens?: number | null; output_nano_usd_per_million_tokens?: number | null };
+}
+
+let modelCache: { at: number; models: LlmModel[] } | null = null;
+
+/** Chat models from the gateway's /models list, cached for 10 minutes (the list is ~300 entries). */
+export async function llmModels(): Promise<LlmModel[]> {
+  if (modelCache && Date.now() - modelCache.at < 10 * 60_000) return modelCache.models;
+  if (!config.llm.baseUrl || !config.llm.apiKey) return [];
+  const data = await providerJson<{ data: GatewayModel[] }>("llm", `${config.llm.baseUrl.replace(/\/$/, "")}/models`, {
+    headers: { Authorization: `Bearer ${config.llm.apiKey}` },
+  });
+  const usd = (nano: number | null | undefined) => (nano == null ? null : nano / 1e9);
+  const models = data.data
+    .filter((m) => !m.supports_embeddings && !m.supports_image_generation)
+    .map((m) => ({ id: m.id, inputUsdPerM: usd(m.pricing?.input_nano_usd_per_million_tokens), outputUsdPerM: usd(m.pricing?.output_nano_usd_per_million_tokens), contextTokens: m.context_window_tokens ?? null }))
+    .sort((a, b) => a.id.localeCompare(b.id));
+  modelCache = { at: Date.now(), models };
+  return models;
+}
+
+/**
+ * Account balance. Experiential Labs serves it at <origin>/api/v1/credits; other OpenAI-compatible
+ * gateways have no standard equivalent, so any failure means "unknown" rather than an error.
+ */
+export async function llmCredits(): Promise<{ totalUsd: number; usedUsd: number; remainingUsd: number } | null> {
+  if (!config.llm.baseUrl || !config.llm.apiKey) return null;
+  try {
+    const res = await fetch(`${new URL(config.llm.baseUrl).origin}/api/v1/credits`, {
+      headers: { Authorization: `Bearer ${config.llm.apiKey}` },
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!res.ok) return null;
+    const { data } = (await res.json()) as { data?: { total_credits?: number; total_usage?: number } };
+    if (typeof data?.total_credits !== "number" || typeof data.total_usage !== "number") return null;
+    return { totalUsd: data.total_credits, usedUsd: data.total_usage, remainingUsd: data.total_credits - data.total_usage };
+  } catch {
+    return null;
+  }
+}

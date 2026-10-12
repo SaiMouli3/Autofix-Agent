@@ -1,4 +1,5 @@
 import type { ProviderInfo, ProviderState } from "../../shared/types";
+import { activeModel } from "../repo/workspace";
 import { config, llmConfigured } from "../config";
 import { get, run } from "../db";
 import { maskSecret, nowIso } from "../util";
@@ -63,7 +64,7 @@ export const PROVIDERS: Record<ProviderKey, ProviderMeta> = {
     testable: true,
     configured: llmConfigured,
     key: () => config.llm.apiKey,
-    detail: () => (llmConfigured() ? `Model: ${config.llm.model}` : "Set LLM_BASE_URL, LLM_API_KEY and LLM_MODEL (any OpenAI-compatible endpoint)."),
+    detail: () => (llmConfigured() ? `Model: ${activeModel()}` : "Set LLM_BASE_URL, LLM_API_KEY and LLM_MODEL (any OpenAI-compatible endpoint)."),
   },
   website_crawler: {
     name: "Website crawler",

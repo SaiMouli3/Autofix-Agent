@@ -11,7 +11,7 @@ import { createExport, EXPORT_COLUMNS } from "./jobs/exportJob";
 import { cancelResearch, queueResearch } from "./jobs/researchJob";
 import { cancelSearch, createSearch, failedBusinessIds } from "./jobs/searchJob";
 import { autocomplete } from "./providers/geocode";
-import { llmJson } from "./providers/llm";
+import { llmCredits, llmJson, llmModels } from "./providers/llm";
 import { listProviders, providerInfo, PROVIDERS, type ProviderKey } from "./providers/registry";
 import { tavilySearch } from "./providers/tavily";
 import { businessIdsFor, getBusiness, queryBusinesses, setTags, updateBusiness } from "./repo/businesses";
@@ -36,7 +36,7 @@ import {
   setEvidenceReviewed,
 } from "./repo/research";
 import { deleteSearch, getSearch, listSearches, patchSearch } from "./repo/searches";
-import { getConfig, saveConfig } from "./repo/workspace";
+import { activeModel, getConfig, saveConfig, setActiveModel } from "./repo/workspace";
 import { enrichFromWebsite } from "./research/researcher";
 import { generateDraft } from "./research/outreach";
 import { HttpError, nowIso } from "./util";
@@ -444,6 +444,15 @@ export async function registerRoutes(app: FastifyInstance) {
     }
     return { ok: true, message: "Connection succeeded.", provider: providerInfo(key) };
   });
+
+  app.get("/api/llm/models", async () => ({ selected: activeModel(), envDefault: config.llm.model, models: await llmModels() }));
+  app.put("/api/llm/model", async (req) => {
+    const { model } = z.object({ model: z.string().trim().min(1).max(200).nullable() }).parse(req.body);
+    if (model && !(await llmModels()).some((m) => m.id === model)) throw new HttpError(400, "invalid_model", "That model is not offered by the configured gateway.");
+    setActiveModel(model);
+    return { selected: activeModel() };
+  });
+  app.get("/api/llm/credits", async () => ({ credits: await llmCredits() }));
 
   app.get("/api/config", async () => getConfig());
   app.put("/api/config", async (req) => {

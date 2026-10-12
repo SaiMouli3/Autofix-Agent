@@ -29,3 +29,15 @@ export function getConfig(): WorkspaceConfig {
 export function saveConfig(next: WorkspaceConfig) {
   run(`INSERT INTO kv (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`, [KEY, JSON.stringify(next)]);
 }
+
+const MODEL_KEY = "llm_model";
+
+/** Model picked in Data Sources; falls back to LLM_MODEL from the environment. */
+export function activeModel(): string | null {
+  return get<{ value: string }>(`SELECT value FROM kv WHERE key = ?`, [MODEL_KEY])?.value ?? process.env.LLM_MODEL ?? null;
+}
+
+export function setActiveModel(model: string | null) {
+  if (model) run(`INSERT INTO kv (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`, [MODEL_KEY, model]);
+  else run(`DELETE FROM kv WHERE key = ?`, [MODEL_KEY]);
+}

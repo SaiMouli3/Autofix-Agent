@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { ExternalLink, PlugZap } from "lucide-react";
 import type { ProviderInfo, ProviderState } from "@/lib/types";
 import { api, errorMessage } from "@/lib/api";
@@ -7,6 +8,7 @@ import { dateTime, relativeTime } from "@/lib/format";
 import { useCrumbs } from "@/components/layout/crumbs";
 import { PageBody, PageHeader } from "@/components/ui/Page";
 import { Button } from "@/components/ui/Button";
+import { Select } from "@/components/ui/Field";
 import { BlockSkeleton, ErrorState } from "@/components/ui/States";
 import { Badge, type Tone } from "@/components/ui/primitives";
 import { useToast } from "@/components/ui/Toast";
@@ -27,6 +29,83 @@ const ENV_HINT: Record<string, string> = {
   nominatim: "NOMINATIM_URL (optional)",
   photon: "PHOTON_URL (optional)",
 };
+
+interface LlmModel {
+  id: string;
+  inputUsdPerM: number | null;
+  outputUsdPerM: number | null;
+  contextTokens: number | null;
+}
+
+const usd = (n: number) => `$${n < 1 ? n.toFixed(3).replace(/0$/, "") : n.toFixed(2)}`;
+const price = (m: LlmModel) => (m.inputUsdPerM == null || m.outputUsdPerM == null ? "price n/a" : `${usd(m.inputUsdPerM)} in / ${usd(m.outputUsdPerM)} out per 1M tokens`);
+
+/** Model picker and account balance for the language-model provider. */
+function LlmModelPanel() {
+  const inv = useInvalidate();
+  const toast = useToast();
+  const [saving, setSaving] = useState(false);
+  const models = useQuery({ queryKey: ["llm-models"], queryFn: () => api.get<{ selected: string | null; envDefault: string | null; models: LlmModel[] }>("/llm/models"), staleTime: 5 * 60_000 });
+  const credits = useQuery({ queryKey: ["llm-credits"], queryFn: () => api.get<{ credits: { totalUsd: number; usedUsd: number; remainingUsd: number } | null }>("/llm/credits"), refetchInterval: 60_000 });
+  const list = models.data?.models ?? [];
+  const selected = models.data?.selected ?? "";
+  const current = list.find((m) => m.id === selected);
+  const c = credits.data?.credits;
+
+  const choose = async (model: string) => {
+    setSaving(true);
+    try {
+      await api.put("/llm/model", { model: model === models.data?.envDefault ? null : model });
+      await inv(["llm-models"], keys.providers);
+      toast.success(`Model set to ${model}`);
+    } catch (e) {
+      toast.error("Could not change model", errorMessage(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="grid gap-4 border-t border-border px-4 py-3 text-sm sm:grid-cols-[1fr_auto]">
+      <div className="min-w-0">
+        <label htmlFor="llm-model" className="t-label">Model</label>
+        {models.isError ? (
+          <p className="mt-1 text-danger">Could not load models: {errorMessage(models.error)}</p>
+        ) : (
+          <>
+            <Select id="llm-model" className="mt-1 max-w-[520px]" value={selected} disabled={models.isLoading || saving} onChange={(e) => choose(e.target.value)}>
+              {models.isLoading && <option>Loading models…</option>}
+              {selected && !current && !models.isLoading && <option value={selected}>{selected}</option>}
+              {list.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.id} · {price(m)}
+                </option>
+              ))}
+            </Select>
+            <p className="t-meta mt-1">
+              {current ? price(current) : "Pick any chat model your gateway offers."}
+              {current?.contextTokens ? ` · ${Math.round(current.contextTokens / 1000)}k context` : ""}
+              {models.data?.envDefault && selected !== models.data.envDefault ? ` · server default: ${models.data.envDefault}` : ""}
+            </p>
+          </>
+        )}
+      </div>
+      <div className="sm:text-right">
+        <div className="t-label">Credits left</div>
+        {credits.isLoading ? (
+          <div className="mt-1 text-fg-3">…</div>
+        ) : c ? (
+          <>
+            <div className={`mt-0.5 text-lg font-semibold tnum ${c.remainingUsd < 5 ? "text-danger" : ""}`}>{usd(c.remainingUsd)}</div>
+            <div className="t-meta tnum">{usd(c.usedUsd)} used of {usd(c.totalUsd)}</div>
+          </>
+        ) : (
+          <div className="mt-1 text-fg-3">Not reported by this gateway</div>
+        )}
+      </div>
+    </div>
+  );
+}
 
 function ProviderCard({ p }: { p: ProviderInfo }) {
   const [testing, setTesting] = useState(false);
@@ -60,6 +139,7 @@ function ProviderCard({ p }: { p: ProviderInfo }) {
           <dd className="mt-0.5 truncate" title={p.lastError ?? undefined}>{p.lastErrorAt ? relativeTime(p.lastErrorAt) : "—"}</dd>
         </div>
       </dl>
+      {p.key === "llm" && p.configured && <LlmModelPanel />}
       {(p.detail || p.lastError) && (
         <div className="space-y-1 border-t border-border px-4 py-2.5 text-xs text-fg-2">
           {p.detail && <p>{p.detail}</p>}
