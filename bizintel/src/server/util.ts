@@ -51,3 +51,44 @@ export async function mapLimit<T>(items: T[], limit: number, fn: (item: T, index
   });
   await Promise.all(workers);
 }
+
+/**
+ * Process-wide cap on concurrent calls. A freed slot is handed straight to the next waiter, so a
+ * newcomer can never slip in between release and wake-up and overshoot the limit. Callers whose
+ * signal aborts while queued leave the queue instead of holding a place.
+ */
+export function semaphore(limit: number) {
+  let active = 0;
+  const waiters: (() => void)[] = [];
+  const acquire = (signal?: AbortSignal) =>
+    new Promise<void>((resolve, reject) => {
+      if (signal?.aborted) return reject(new DOMException("Aborted", "AbortError"));
+      if (active < limit) {
+        active++;
+        return resolve();
+      }
+      const wake = () => {
+        signal?.removeEventListener("abort", onAbort);
+        resolve();
+      };
+      const onAbort = () => {
+        waiters.splice(waiters.indexOf(wake), 1);
+        reject(new DOMException("Aborted", "AbortError"));
+      };
+      waiters.push(wake);
+      signal?.addEventListener("abort", onAbort, { once: true });
+    });
+  const release = () => {
+    const next = waiters.shift();
+    if (next) next();
+    else active--;
+  };
+  return async <T>(fn: () => Promise<T>, signal?: AbortSignal): Promise<T> => {
+    await acquire(signal);
+    try {
+      return await fn();
+    } finally {
+      release();
+    }
+  };
+}

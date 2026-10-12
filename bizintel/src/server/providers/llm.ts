@@ -1,5 +1,6 @@
 import { config, llmConfigured } from "../config";
 import { activeModel } from "../repo/workspace";
+import { semaphore, sleep } from "../util";
 import { ProviderError, providerJson } from "./http";
 
 export { llmConfigured };
@@ -12,13 +13,25 @@ interface ChatResponse {
  * Calls an OpenAI-compatible chat-completions endpoint and parses a JSON object from the reply.
  * The caller is responsible for validating the shape of the returned object.
  */
+// Searches and research jobs each fan out (2 search lanes × 3 research workers + 3 research jobs),
+// so without a server-wide cap ~10 long generations hit the gateway at once and time out together.
+const llmSlot = semaphore(Math.max(1, Number(process.env.LLM_CONCURRENCY ?? 4)));
+const MAX_ATTEMPTS = 4;
+
+/** Timeouts, network errors, malformed replies (status null), rate limits and gateway 5xx are worth retrying. */
+// A reply cut off at max_tokens would be cut off again, so it is not retried.
+const transient = (e: unknown) => e instanceof ProviderError && (e.status === null || e.status === 429 || e.status >= 500) && !/cut off/.test(e.message);
+
 export async function llmJson<T>(system: string, user: string, opts: { signal?: AbortSignal; maxTokens?: number } = {}): Promise<T> {
-  // Replies are occasionally cut short or malformed; one retry recovers most of these.
-  try {
-    return await llmJsonOnce<T>(system, user, opts);
-  } catch (e) {
-    if (!(e instanceof ProviderError) || e.status !== null || opts.signal?.aborted) throw e;
-    return llmJsonOnce<T>(system, user, opts);
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await llmSlot(() => llmJsonOnce<T>(system, user, opts), opts.signal);
+    } catch (e) {
+      if (!transient(e) || attempt >= MAX_ATTEMPTS || opts.signal?.aborted) throw e;
+      // Exponential backoff with jitter; rate limits start higher so the gateway's window can reset.
+      const base = (e as ProviderError).status === 429 ? 5_000 : 2_000;
+      await sleep(Math.min(30_000, base * 2 ** (attempt - 1)) * (0.75 + Math.random() * 0.5), opts.signal);
+    }
   }
 }
 
@@ -45,7 +58,8 @@ async function llmJsonOnce<T>(system: string, user: string, opts: { signal?: Abo
             { role: "user", content: user },
           ],
         }),
-        timeoutMs: 90_000,
+        // Long generations (deep research asks for 8000 tokens) outlast a flat 90s on a busy gateway.
+        timeoutMs: Math.max(90_000, (opts.maxTokens ?? 1800) * 30),
         signal: opts.signal,
       });
     } catch (e) {
