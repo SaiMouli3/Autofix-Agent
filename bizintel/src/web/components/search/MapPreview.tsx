@@ -32,13 +32,15 @@ export default function MapPreview({ lat, lon, radiusMeters, points = [], onPoin
     if (!m || !g) return;
     g.clearLayers();
     const primary = getComputedStyle(document.documentElement).getPropertyValue("--c-primary").trim().split(" ").join(",");
-    const circle = L.circle([lat, lon], { radius: radiusMeters, color: `rgb(${primary})`, weight: 1.5, fillOpacity: 0.06 }).addTo(g);
+    L.circle([lat, lon], { radius: radiusMeters, color: `rgb(${primary})`, weight: 1.5, fillOpacity: 0.06 }).addTo(g);
     L.circleMarker([lat, lon], { radius: 5, color: "#fff", weight: 2, fillColor: `rgb(${primary})`, fillOpacity: 1 }).addTo(g).bindTooltip("Search center");
     for (const p of points) {
       const mk = L.circleMarker([p.lat, p.lon], { radius: 4, color: `rgb(${primary})`, weight: 1, fillColor: `rgb(${primary})`, fillOpacity: 0.55 }).addTo(g).bindTooltip(p.label);
       if (onPointClick) mk.on("click", () => onPointClick(p.id));
     }
-    m.fitBounds(circle.getBounds(), { padding: [12, 12] });
+    // Not circle.getBounds(): on first render the map has no view yet, so Leaflet defers adding
+    // the circle and it has no _map to project with. Geographic bounds need no map.
+    m.fitBounds(L.latLng(lat, lon).toBounds(radiusMeters * 2), { padding: [12, 12] });
   }, [lat, lon, radiusMeters, points, onPointClick]);
 
   return <div ref={el} style={{ height }} className="w-full rounded-md" role="img" aria-label={`Map of the search area: ${(radiusMeters / 1000).toFixed(1)} km radius${points.length ? `, ${points.length} businesses plotted` : ""}`} />;
