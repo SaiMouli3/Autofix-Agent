@@ -1,5 +1,6 @@
 import fastifyStatic from "@fastify/static";
 import Fastify from "fastify";
+import { timingSafeEqual } from "node:crypto";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { ZodError } from "zod";
@@ -21,6 +22,27 @@ app.setErrorHandler((err, _req, reply) => {
   app.log.error(err);
   return reply.code(500).send({ error: "internal_error", message: "Something went wrong on the server. The error has been logged." });
 });
+
+const safeEqual = (a: string, b: string) => {
+  const x = Buffer.from(a);
+  const y = Buffer.from(b);
+  return x.length === y.length && timingSafeEqual(x, y);
+};
+
+// Optional shared password for deployments without a sign-in system.
+const auth = config.basicAuth;
+if (auth) {
+  app.addHook("onRequest", async (req, reply) => {
+    if (req.url === "/api/health") return;
+    const header = req.headers.authorization ?? "";
+    const [scheme, encoded] = header.split(" ");
+    const [user, ...rest] = Buffer.from(encoded ?? "", "base64").toString().split(":");
+    if (scheme === "Basic" && safeEqual(user, auth.user) && safeEqual(rest.join(":"), auth.password)) return;
+    reply.header("WWW-Authenticate", 'Basic realm="BizIntel", charset="UTF-8"').code(401).send({ error: "unauthorized", message: "Sign in required." });
+  });
+} else if (config.production && config.host !== "127.0.0.1") {
+  console.warn("[security] BASIC_AUTH_USER/BASIC_AUTH_PASSWORD are not set — anyone who can reach this server can use it.");
+}
 
 await registerRoutes(app);
 

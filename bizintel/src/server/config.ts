@@ -18,6 +18,8 @@ export const config = {
   userAgent: env.BIZINTEL_USER_AGENT ?? "BizIntel/0.1 (business research platform)",
   contactEmail: env.BIZINTEL_CONTACT_EMAIL ?? null,
   tavilyApiKey: env.TAVILY_API_KEY ?? null,
+  /** When both are set, every request except the health check requires HTTP Basic auth. */
+  basicAuth: env.BASIC_AUTH_USER && env.BASIC_AUTH_PASSWORD ? { user: env.BASIC_AUTH_USER, password: env.BASIC_AUTH_PASSWORD } : null,
   llm: {
     /** Any OpenAI-compatible chat-completions endpoint. */
     baseUrl: env.LLM_BASE_URL ?? null,

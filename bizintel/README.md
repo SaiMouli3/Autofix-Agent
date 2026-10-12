@@ -24,6 +24,19 @@ Requires Node 22.13+ (uses the built-in `node:sqlite`). Data lives in `data/` (S
 
 Checks: `npm run typecheck`, `npm run lint`, `npm test`.
 
+## Deploying to Render
+
+`render.yaml` at the repository root is a Render Blueprint for this app:
+- one Node web service rooted at `bizintel/`
+- a 1 GB persistent disk at `/var/data` for the SQLite database and exports (a disk requires a paid instance)
+- a health check on `/api/health`
+
+1. Merge this app into the branch Render deploys, or select this branch when creating the Blueprint.
+2. In Render, choose **New → Blueprint** and pick this repository.
+3. When prompted, fill in the secret values: `TAVILY_API_KEY`, `LLM_API_KEY`, `BASIC_AUTH_USER`, `BASIC_AUTH_PASSWORD` and `BIZINTEL_USER_AGENT`.
+
+**Always set `BASIC_AUTH_USER` and `BASIC_AUTH_PASSWORD` on a public URL.** The app has no sign-in. Without them, anyone with the link can run searches on your Tavily and model credits.
+
 ## Architecture
 
 ```

@@ -1,0 +1,38 @@
+# Render Blueprint for the BizIntel app in bizintel/.
+# Secrets marked `sync: false` are entered in the Render dashboard on first deploy.
+services:
+  - type: web
+    name: bizintel
+    runtime: node
+    rootDir: bizintel
+    plan: starter            # a persistent disk requires a paid instance
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/health
+    disk:
+      name: bizintel-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: NODE_VERSION
+        value: 22.13.1
+      - key: HOST
+        value: 0.0.0.0
+      - key: BIZINTEL_DATA_DIR
+        value: /var/data
+      - key: BASIC_AUTH_USER
+        sync: false
+      - key: BASIC_AUTH_PASSWORD
+        sync: false
+      - key: TAVILY_API_KEY
+        sync: false
+      - key: LLM_BASE_URL
+        value: https://api.experientiallabs.ai/v1
+      - key: LLM_API_KEY
+        sync: false
+      - key: LLM_MODEL
+        value: claude-haiku-5.5
+      - key: LLM_PROVIDER_NAME
+        value: Experiential Labs
+      - key: BIZINTEL_USER_AGENT
+        sync: false
