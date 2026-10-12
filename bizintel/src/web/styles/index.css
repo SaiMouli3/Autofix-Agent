@@ -1,0 +1,68 @@
+@import "./tokens.css";
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+  body {
+    @apply bg-bg text-fg font-sans text-base;
+    font-feature-settings: "cv11", "ss01", "ss03";
+  }
+  :focus-visible {
+    outline: 2px solid rgb(var(--c-primary));
+    outline-offset: 2px;
+    border-radius: 3px;
+  }
+  ::selection {
+    background: rgb(var(--c-primary) / 0.2);
+  }
+  h1, h2, h3, h4 {
+    @apply text-fg;
+    letter-spacing: -0.01em;
+  }
+}
+
+@layer components {
+  /* Typography roles */
+  .t-page-title { @apply text-xl font-semibold tracking-tight; }
+  .t-section-title { @apply text-md font-semibold; }
+  .t-card-title { @apply text-sm font-semibold; }
+  .t-label { @apply text-xs font-medium text-fg-2; }
+  .t-meta { @apply text-xs text-fg-3; }
+  .t-th { @apply text-2xs font-semibold uppercase tracking-wide text-fg-3; }
+  .tnum { font-variant-numeric: tabular-nums; }
+
+  .panel { @apply rounded-lg border border-border bg-surface; }
+  .panel-header { @apply flex items-center justify-between gap-3 border-b border-border px-4 py-3; }
+  .divide-row > * + * { @apply border-t border-border; }
+
+  .link { @apply text-primary underline-offset-2 hover:underline; }
+  .scrollbar-thin { scrollbar-width: thin; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+@keyframes skeleton { 0% { opacity: .55 } 50% { opacity: 1 } 100% { opacity: .55 } }
+.skeleton { animation: skeleton 1.4s ease-in-out infinite; @apply rounded bg-muted; }
+@keyframes spin { to { transform: rotate(360deg) } }
+.animate-spin { animation: spin .8s linear infinite; }
+@keyframes pulse-dot { 0%, 100% { opacity: 1 } 50% { opacity: .35 } }
+.animate-pulse-dot { animation: pulse-dot 1.4s ease-in-out infinite; }
+@keyframes pop-in { from { opacity: 0; transform: translateY(4px) scale(.98) } to { opacity: 1; transform: none } }
+.animate-pop { animation: pop-in var(--dur-base) ease-out; }
+
+/* Leaflet sits inside panels; keep its controls under our popovers. */
+.leaflet-container { font: inherit; background: rgb(var(--c-subtle)); }
+.leaflet-pane, .leaflet-top, .leaflet-bottom { z-index: 1 !important; }

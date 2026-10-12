@@ -1,0 +1,83 @@
+/** Design tokens live in src/web/styles/tokens.css; Tailwind only maps names onto them. */
+const c = (name) => `rgb(var(--c-${name}) / <alpha-value>)`;
+
+/** @type {import('tailwindcss').Config} */
+export default {
+  content: ["./src/web/index.html", "./src/web/**/*.{ts,tsx}"],
+  darkMode: ["selector", '[data-theme="dark"]'],
+  theme: {
+    colors: {
+      transparent: "transparent",
+      current: "currentColor",
+      white: "#fff",
+      black: "#000",
+      bg: c("bg"),
+      surface: c("surface"),
+      subtle: c("subtle"),
+      muted: c("muted"),
+      border: c("border"),
+      "border-strong": c("border-strong"),
+      fg: c("fg"),
+      "fg-2": c("fg-2"),
+      "fg-3": c("fg-3"),
+      primary: c("primary"),
+      "primary-fg": c("primary-fg"),
+      "primary-subtle": c("primary-subtle"),
+      success: c("success"),
+      "success-subtle": c("success-subtle"),
+      warning: c("warning"),
+      "warning-subtle": c("warning-subtle"),
+      danger: c("danger"),
+      "danger-subtle": c("danger-subtle"),
+      info: c("info"),
+      "info-subtle": c("info-subtle"),
+      neutral: c("neutral"),
+      "neutral-subtle": c("neutral-subtle"),
+    },
+    fontFamily: {
+      sans: ["Inter Variable", "Inter", "ui-sans-serif", "system-ui", "-apple-system", "Segoe UI", "sans-serif"],
+      mono: ["ui-monospace", "SFMono-Regular", "Menlo", "Consolas", "monospace"],
+    },
+    fontSize: {
+      // [size, line-height]
+      "2xs": ["11px", "16px"],
+      xs: ["12px", "16px"],
+      sm: ["13px", "20px"],
+      base: ["14px", "22px"],
+      md: ["15px", "24px"],
+      lg: ["17px", "26px"],
+      xl: ["20px", "28px"],
+      "2xl": ["24px", "32px"],
+    },
+    borderRadius: {
+      none: "0",
+      sm: "var(--radius-sm)",
+      DEFAULT: "var(--radius-md)",
+      md: "var(--radius-md)",
+      lg: "var(--radius-lg)",
+      full: "9999px",
+    },
+    boxShadow: {
+      none: "none",
+      xs: "var(--shadow-xs)",
+      sm: "var(--shadow-sm)",
+      md: "var(--shadow-md)",
+      lg: "var(--shadow-lg)",
+      focus: "0 0 0 3px rgb(var(--c-primary) / 0.28)",
+    },
+    extend: {
+      spacing: {
+        sidebar: "var(--sidebar-w)",
+        "sidebar-collapsed": "var(--sidebar-w-collapsed)",
+        header: "var(--header-h)",
+        row: "var(--row-h)",
+        control: "var(--control-h)",
+        "control-sm": "var(--control-h-sm)",
+      },
+      maxWidth: { content: "var(--content-max)", prose: "68ch" },
+      zIndex: { sticky: "var(--z-sticky)", header: "var(--z-header)", drawer: "var(--z-drawer)", modal: "var(--z-modal)", popover: "var(--z-popover)", toast: "var(--z-toast)" },
+      transitionDuration: { fast: "var(--dur-fast)", base: "var(--dur-base)", slow: "var(--dur-slow)" },
+    },
+  },
+  plugins: [],
+};
