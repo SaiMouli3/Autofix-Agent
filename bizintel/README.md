@@ -61,7 +61,7 @@ Results appear in the table as soon as discovery finishes, so one slow website n
 | Overpass (OSM) | Radius business discovery | none | working (mirror failover) |
 | Built-in crawler | Official website pages | none | working |
 | Tavily | Website lookup, third-party sources, extraction fallback | `TAVILY_API_KEY` | working |
-| Language model | Summaries, evidence classification, opportunities, outreach | `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL` | **needs configuration** |
+| Language model | Summaries, evidence classification, opportunities, outreach | `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL` (optional `LLM_TEMPERATURE`) | working — tested with Experiential Labs (`https://api.experientiallabs.ai/v1`, model `claude-haiku-5.5`) |
 
 Without a language model, research still extracts published facts and contacts. Reports are then labelled "extraction only".
 

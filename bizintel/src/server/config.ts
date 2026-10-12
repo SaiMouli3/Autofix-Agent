@@ -24,6 +24,8 @@ export const config = {
     apiKey: env.LLM_API_KEY ?? null,
     model: env.LLM_MODEL ?? null,
     providerName: env.LLM_PROVIDER_NAME ?? "Language model",
+    /** Unset by default: some model routes only accept their default temperature. */
+    temperature: env.LLM_TEMPERATURE ? Number(env.LLM_TEMPERATURE) : null,
   },
   overpassUrls: (env.OVERPASS_URLS ??
     "https://overpass-api.de/api/interpreter,https://overpass.private.coffee/api/interpreter,https://maps.mail.ru/osm/tools/overpass/api/interpreter")

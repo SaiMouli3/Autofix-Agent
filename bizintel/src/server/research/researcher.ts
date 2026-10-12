@@ -229,7 +229,8 @@ Rules:
 - Every claim must cite the URL of the document that supports it and include a short VERBATIM excerpt (8–40 words) copied exactly from that document.
 - Classify each claim: "verified_fact" (stated on the company's own website), "third_party" (stated by another source), "inference" (reasonably implied by cited text — still give the excerpt it is inferred from), "hypothesis" (plausible but not supported — no excerpt).
 - If information is not present, say so in "missing_information" rather than guessing.
-- Write concise, neutral prose suitable for a professional research brief.
+- Write concise, neutral prose suitable for a professional research brief: at most 3 sentences per section.
+- Return at most 15 claims, choosing the most informative ones.
 Reply with a single JSON object only.`;
 
 function buildPrompt(b: Business, docs: { url: string; title: string | null; kind: string; text: string }[], offering: string, needKeywords: string[]): string {
@@ -316,7 +317,7 @@ export async function researchCompany(businessId: string, depth: ResearchDepth, 
     confidenceRationale = "Research limit reached before synthesis.";
   } else {
     const prompt = buildPrompt(b, budgetDocs(docs, depth === "deep" ? 7000 : 5000, depth === "deep" ? 32_000 : 20_000), cfg.qualification.offeringDescription, cfg.qualification.needKeywords);
-    const result = await llmJson<LlmResearch>(SYSTEM_PROMPT, prompt, { signal, maxTokens: depth === "deep" ? 3000 : 2000 });
+    const result = await llmJson<LlmResearch>(SYSTEM_PROMPT, prompt, { signal, maxTokens: depth === "deep" ? 8000 : 5000 });
     model = llmModelName();
     // Drop previous model-derived evidence before inserting the new set.
     clearEvidence(businessId, "model");
