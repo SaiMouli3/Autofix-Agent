@@ -3,7 +3,9 @@ import type { NextConfig } from "next";
 // The browser only ever talks to this Next.js origin. API calls are proxied
 // server-side to the Go API, so session cookies stay first-party and no API
 // secrets or internal URLs reach the client bundle.
-const API_URL = process.env.API_URL ?? "http://localhost:8080";
+// Render's private-network address (fromService hostport) is "host:port" with no scheme.
+const rawApiUrl = process.env.API_URL ?? "http://localhost:8080";
+const API_URL = /^https?:\/\//.test(rawApiUrl) ? rawApiUrl : `http://${rawApiUrl}`;
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
