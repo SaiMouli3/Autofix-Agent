@@ -19,14 +19,26 @@ const llmSlot = semaphore(Math.max(1, Number(process.env.LLM_CONCURRENCY ?? 4)))
 const MAX_ATTEMPTS = 4;
 
 /** Timeouts, network errors, malformed replies (status null), rate limits and gateway 5xx are worth retrying. */
-// A reply cut off at max_tokens would be cut off again, so it is not retried.
-const transient = (e: unknown) => e instanceof ProviderError && (e.status === null || e.status === 429 || e.status >= 500) && !/cut off/.test(e.message);
+// A reply cut off at max_tokens would be cut off again at the same cap, so it is not retried as transient.
+const cutOff = (e: unknown) => e instanceof ProviderError && /cut off/.test(e.message);
+const transient = (e: unknown) => e instanceof ProviderError && (e.status === null || e.status === 429 || e.status >= 500) && !cutOff(e);
+const MAX_GROWN_TOKENS = 32_000;
 
 export async function llmJson<T>(system: string, user: string, opts: { signal?: AbortSignal; maxTokens?: number } = {}): Promise<T> {
+  let callOpts = opts;
+  let grown = false;
   for (let attempt = 1; ; attempt++) {
     try {
-      return await llmSlot(() => llmJsonOnce<T>(system, user, opts), opts.signal);
+      return await llmSlot(() => llmJsonOnce<T>(system, user, callOpts), opts.signal);
     } catch (e) {
+      // Reasoning models spend hidden "thinking" tokens from the same max_tokens budget, so a reply can be
+      // cut off after ~1/3 of its answer. Retry once with a larger cap; billing follows tokens actually used.
+      const cap = callOpts.maxTokens ?? 1800;
+      if (cutOff(e) && !grown && cap < MAX_GROWN_TOKENS && !opts.signal?.aborted) {
+        grown = true;
+        callOpts = { ...opts, maxTokens: Math.min(MAX_GROWN_TOKENS, Math.ceil(cap * 2.5)) };
+        continue;
+      }
       if (!transient(e) || attempt >= MAX_ATTEMPTS || opts.signal?.aborted) throw e;
       // Exponential backoff with jitter; rate limits start higher so the gateway's window can reset.
       const base = (e as ProviderError).status === 429 ? 5_000 : 2_000;
