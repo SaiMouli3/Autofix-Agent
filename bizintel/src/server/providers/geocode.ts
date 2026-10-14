@@ -1,6 +1,6 @@
 import type { LocationSuggestion, ResolvedLocation } from "../../shared/types";
 import { config } from "../config";
-import { providerJson, rateLimiter } from "./http";
+import { ProviderError, providerJson, rateLimiter } from "./http";
 
 interface PhotonFeature {
   properties: {
@@ -65,14 +65,21 @@ export function parseCoordinates(q: string): LocationSuggestion | null {
   };
 }
 
-export async function autocomplete(q: string, signal?: AbortSignal): Promise<LocationSuggestion[]> {
+export async function autocomplete(q: string, signal?: AbortSignal, opts: { fallback?: boolean } = {}): Promise<LocationSuggestion[]> {
   const coords = parseCoordinates(q);
   if (coords) {
     const rev = await reverse(coords.lat, coords.lon, signal).catch(() => null);
     return [rev ? { ...coords, country: rev.country, countryCode: rev.countryCode, region: rev.region, label: `${coords.label} — ${rev.label}` } : coords];
   }
   const url = `${config.photonUrl}/api/?q=${encodeURIComponent(q)}&limit=7&lang=en`;
-  const data = await providerJson<{ features: PhotonFeature[] }>("photon", url, { signal, timeoutMs: 8000 });
+  let data: { features: PhotonFeature[] };
+  try {
+    data = await providerJson<{ features: PhotonFeature[] }>("photon", url, { signal, timeoutMs: 8000 });
+  } catch (e) {
+    // The public Photon instance refuses some cloud hosts outright (Render Singapore: ECONNREFUSED).
+    if (e instanceof ProviderError && !signal?.aborted && opts.fallback !== false) return fallbackAutocomplete(q, signal);
+    throw e;
+  }
   const seen = new Set<string>();
   const out: LocationSuggestion[] = [];
   data.features.forEach((f, i) => {
@@ -100,6 +107,71 @@ export async function autocomplete(q: string, signal?: AbortSignal): Promise<Loc
 }
 
 const nominatimLimit = rateLimiter(1100);
+
+/** Nominatim /search and LocationIQ /autocomplete share this result shape. */
+export interface OsmPlace {
+  osm_type?: string;
+  osm_id?: string | number;
+  lat: string;
+  lon: string;
+  display_name: string;
+  type?: string;
+  addresstype?: string;
+  boundingbox?: [string, string, string, string]; // [minLat, maxLat, minLon, maxLon]
+  address?: { country?: string; country_code?: string; state?: string };
+}
+
+export function fromOsmPlaces(places: OsmPlace[]): LocationSuggestion[] {
+  return places.map((p, i) => {
+    const kind = p.addresstype ?? p.type ?? "place";
+    const b = p.boundingbox?.map(Number);
+    return {
+      id: `${p.osm_type?.[0] ?? "x"}${p.osm_id ?? i}`,
+      label: p.display_name,
+      lat: Number(p.lat),
+      lon: Number(p.lon),
+      country: p.address?.country ?? null,
+      countryCode: p.address?.country_code?.toUpperCase() ?? null,
+      region: p.address?.state ?? null,
+      confidence: Math.max(0.3, (KIND_CONFIDENCE[kind] ?? 0.6) - i * 0.08),
+      kind,
+      bbox: b && b.length === 4 && b.every(Number.isFinite) ? (b as [number, number, number, number]) : null,
+    };
+  });
+}
+
+// ponytail: unbounded-by-time cache capped at 500 queries; swap for a TTL cache if place data must stay fresh.
+const fallbackCache = new Map<string, LocationSuggestion[]>();
+
+/**
+ * Used only when Photon fails. LocationIQ (free key, allows autocomplete) when configured;
+ * otherwise the public Nominatim instance, whose policy discourages autocomplete, so it is
+ * serialized at 1 req/s, needs 3+ characters, and is cached.
+ */
+async function fallbackAutocomplete(q: string, signal?: AbortSignal): Promise<LocationSuggestion[]> {
+  const key = q.trim().toLowerCase();
+  const hit = fallbackCache.get(key);
+  if (hit) return hit;
+  let places: OsmPlace[];
+  if (config.locationiqApiKey) {
+    const url = `${config.locationiqUrl}/v1/autocomplete?key=${encodeURIComponent(config.locationiqApiKey)}&q=${encodeURIComponent(q)}&limit=7&dedupe=1`;
+    try {
+      places = await providerJson<OsmPlace[]>("locationiq", url, { signal, timeoutMs: 8000 });
+    } catch (e) {
+      if (e instanceof ProviderError && e.status === 404) places = []; // LocationIQ answers "no match" with 404
+      else throw e;
+    }
+  } else {
+    if (key.length < 3) return [];
+    const email = config.contactEmail ? `&email=${encodeURIComponent(config.contactEmail)}` : "";
+    const url = `${config.nominatimUrl}/search?format=jsonv2&addressdetails=1&limit=7&q=${encodeURIComponent(q)}${email}`;
+    places = await nominatimLimit(() => providerJson<OsmPlace[]>("nominatim", url, { signal, timeoutMs: 10_000 }));
+  }
+  const out = fromOsmPlaces(places);
+  if (fallbackCache.size >= 500) fallbackCache.delete(fallbackCache.keys().next().value!);
+  fallbackCache.set(key, out);
+  return out;
+}
 
 interface NominatimReverse {
   display_name: string;

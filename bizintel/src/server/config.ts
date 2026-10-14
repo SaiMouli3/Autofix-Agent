@@ -36,6 +36,9 @@ export const config = {
     .filter(Boolean),
   nominatimUrl: env.NOMINATIM_URL ?? "https://nominatim.openstreetmap.org",
   photonUrl: env.PHOTON_URL ?? "https://photon.komoot.io",
+  /** Optional location-autocomplete fallback when Photon is unreachable (free key at locationiq.com). */
+  locationiqApiKey: env.LOCATIONIQ_API_KEY ?? null,
+  locationiqUrl: env.LOCATIONIQ_URL ?? "https://api.locationiq.com",
 };
 
 export const llmConfigured = () => Boolean(config.llm.baseUrl && config.llm.apiKey && config.llm.model);

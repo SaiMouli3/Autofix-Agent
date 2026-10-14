@@ -4,7 +4,7 @@ import { config, llmConfigured } from "../config";
 import { get, run } from "../db";
 import { maskSecret, nowIso } from "../util";
 
-export type ProviderKey = "photon" | "nominatim" | "overpass" | "tavily" | "llm" | "website_crawler";
+export type ProviderKey = "photon" | "locationiq" | "nominatim" | "overpass" | "tavily" | "llm" | "website_crawler";
 
 interface ProviderMeta {
   name: string;
@@ -26,6 +26,16 @@ export const PROVIDERS: Record<ProviderKey, ProviderMeta> = {
     testable: true,
     configured: () => true,
     key: () => null,
+  },
+  locationiq: {
+    name: "LocationIQ",
+    purpose: "Location autocomplete fallback when Photon is unreachable",
+    requiresKey: true,
+    docsUrl: "https://locationiq.com/docs",
+    testable: false,
+    configured: () => Boolean(config.locationiqApiKey),
+    key: () => config.locationiqApiKey,
+    detail: () => (config.locationiqApiKey ? null : "Not set: when Photon fails, autocomplete falls back to the public Nominatim instance (1 request per second)."),
   },
   nominatim: {
     name: "Nominatim (OpenStreetMap)",

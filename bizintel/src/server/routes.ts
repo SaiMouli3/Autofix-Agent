@@ -417,7 +417,7 @@ export async function registerRoutes(app: FastifyInstance) {
     try {
       switch (key) {
         case "photon":
-          await autocomplete("London");
+          await autocomplete("London", undefined, { fallback: false });
           break;
         case "nominatim": {
           const { reverse } = await import("./providers/geocode");
