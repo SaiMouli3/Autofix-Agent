@@ -2,6 +2,9 @@ import { config } from "../config";
 import { recordFailure, recordSuccess, type ProviderKey } from "./registry";
 
 export class ProviderError extends Error {
+  // The API error handler matches on name to answer 502 with the provider's message; Error
+  // subclasses keep name "Error" unless set, which turned every provider failure into a 500.
+  override name = "ProviderError";
   constructor(
     public provider: ProviderKey,
     message: string,
