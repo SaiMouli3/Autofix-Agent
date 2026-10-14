@@ -1,0 +1,118 @@
+/* ──────────────────────────────────────────────────────────────────────────
+   Design tokens. Colors are RGB channels so Tailwind can apply opacity.
+   ────────────────────────────────────────────────────────────────────────── */
+:root {
+  color-scheme: light;
+  --c-bg: 247 247 245;
+  --c-surface: 255 255 255;
+  --c-subtle: 242 242 239;
+  --c-muted: 233 233 229;
+  --c-border: 228 228 223;
+  --c-border-strong: 208 208 202;
+  --c-fg: 28 29 33;
+  --c-fg-2: 88 91 99;
+  --c-fg-3: 128 131 139;
+  --c-primary: 70 82 204;
+  --c-primary-fg: 255 255 255;
+  --c-primary-subtle: 236 238 252;
+  --c-success: 36 118 78;
+  --c-success-subtle: 230 244 236;
+  --c-warning: 166 106 12;
+  --c-warning-subtle: 252 243 224;
+  --c-danger: 186 44 37;
+  --c-danger-subtle: 252 235 233;
+  --c-info: 34 99 196;
+  --c-info-subtle: 232 241 252;
+  --c-neutral: 100 104 112;
+  --c-neutral-subtle: 238 238 235;
+
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+
+  --shadow-xs: 0 1px 1px rgb(16 17 20 / 0.04);
+  --shadow-sm: 0 1px 2px rgb(16 17 20 / 0.06), 0 1px 1px rgb(16 17 20 / 0.03);
+  --shadow-md: 0 4px 12px rgb(16 17 20 / 0.08), 0 1px 3px rgb(16 17 20 / 0.05);
+  --shadow-lg: 0 16px 40px rgb(16 17 20 / 0.14), 0 2px 6px rgb(16 17 20 / 0.06);
+
+  --sidebar-w: 236px;
+  --sidebar-w-collapsed: 56px;
+  --header-h: 52px;
+  --row-h: 44px;
+  --control-h: 34px;
+  --control-h-sm: 28px;
+  --content-max: 1200px;
+  --modal-w: 520px;
+  --modal-w-lg: 720px;
+
+  --dur-fast: 100ms;
+  --dur-base: 160ms;
+  --dur-slow: 240ms;
+
+  --z-sticky: 10;
+  --z-header: 20;
+  --z-drawer: 40;
+  --z-modal: 50;
+  --z-popover: 60;
+  --z-toast: 70;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --c-bg: 17 18 20;
+    --c-surface: 24 25 28;
+    --c-subtle: 30 32 36;
+    --c-muted: 38 40 45;
+    --c-border: 44 46 52;
+    --c-border-strong: 62 65 72;
+    --c-fg: 236 237 239;
+    --c-fg-2: 168 171 178;
+    --c-fg-3: 128 131 139;
+    --c-primary: 132 142 240;
+    --c-primary-fg: 14 15 30;
+    --c-primary-subtle: 35 38 66;
+    --c-success: 92 190 137;
+    --c-success-subtle: 22 46 34;
+    --c-warning: 226 168 72;
+    --c-warning-subtle: 54 40 16;
+    --c-danger: 240 118 108;
+    --c-danger-subtle: 60 26 24;
+    --c-info: 112 166 240;
+    --c-info-subtle: 22 38 62;
+    --c-neutral: 150 154 162;
+    --c-neutral-subtle: 36 38 42;
+    --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.4);
+    --shadow-md: 0 4px 14px rgb(0 0 0 / 0.45);
+    --shadow-lg: 0 16px 40px rgb(0 0 0 / 0.55);
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --c-bg: 17 18 20;
+  --c-surface: 24 25 28;
+  --c-subtle: 30 32 36;
+  --c-muted: 38 40 45;
+  --c-border: 44 46 52;
+  --c-border-strong: 62 65 72;
+  --c-fg: 236 237 239;
+  --c-fg-2: 168 171 178;
+  --c-fg-3: 128 131 139;
+  --c-primary: 132 142 240;
+  --c-primary-fg: 14 15 30;
+  --c-primary-subtle: 35 38 66;
+  --c-success: 92 190 137;
+  --c-success-subtle: 22 46 34;
+  --c-warning: 226 168 72;
+  --c-warning-subtle: 54 40 16;
+  --c-danger: 240 118 108;
+  --c-danger-subtle: 60 26 24;
+  --c-info: 112 166 240;
+  --c-info-subtle: 22 38 62;
+  --c-neutral: 150 154 162;
+  --c-neutral-subtle: 36 38 42;
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.4);
+  --shadow-md: 0 4px 14px rgb(0 0 0 / 0.45);
+  --shadow-lg: 0 16px 40px rgb(0 0 0 / 0.55);
+}
